@@ -38,12 +38,19 @@ Background and rationale: [`docs/design.md`](docs/design.md). Literature:
 src/lib.rs                 re-exports
 src/workspace.rs           ids, Chunk, Processor, TickRecord, Workspace (propose → select → broadcast)
 src/arbiter/mod.rs         Arbiter trait, Selection
-src/arbiter/argmax.rs      P1 baseline
-src/metrics.rs             GroundTruth + metrics over &[TickRecord]
+src/arbiter/argmax.rs      P1 baseline (P2 arm A0)
+src/arbiter/score.rs       P2 arms A1–A3, S0–S3: habituation, novelty, deterministic or stochastic selection
+src/arbiter/tournament.rs  stochastic tournament, and the deterministic one used as an implementation check
+src/arbiter/round_robin.rs, uniform_random.rs   P2 baselines RR, RND
+src/metrics.rs             GroundTruth + metrics over &[TickRecord], per-run switch rate
+src/stats.rs               Wilson interval, stratified paired bootstrap, percentile rule
 src/rng.rs                 SplitMix64, the only randomness source
-src/scenario/              Scenario, ScriptedProcessor, the three scenarios
-tests/                     integration tests (workspace, metrics, scenarios, baseline)
-examples/run_scenarios.rs  metrics table per scenario × arbiter
+src/scenario/              Scenario, ScriptedProcessor, fixed scenarios, family G generator
+src/experiment/            P2: arm matrix, shared vectors and seeds, run grid, estimands, runner phases
+tests/                     integration tests (development data only)
+examples/run_scenarios.rs  metrics table per scenario × arbiter (P1)
+examples/p2.rs             P2 runner: sanity | dev [--smoke DIR] | heldout (gated)
+scripts/check-family-b-bundle.sh   Family B bundle check, pinned to the pre-registration commit
 ```
 
 ## Phase plan and acceptance criteria
@@ -84,6 +91,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 cargo run --example run_scenarios
+cargo run --release --example p2 -- sanity   # P2 baseline sanity checks, development data only
 scripts/check-family-b-bundle.sh   # Family B author bundle: standalone build + leakage scan
 ```
 
