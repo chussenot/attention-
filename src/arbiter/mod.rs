@@ -1,5 +1,9 @@
 //! Arbiters: the pluggable policy that decides which candidate wins the workspace.
 
+mod argmax;
+
+pub use argmax::ArgmaxArbiter;
+
 use crate::workspace::{Chunk, Tick};
 
 /// Selects at most one winner among the candidates of a tick.

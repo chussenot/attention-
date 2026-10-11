@@ -15,7 +15,7 @@ pub mod rng;
 pub mod scenario;
 pub mod workspace;
 
-pub use arbiter::{Arbiter, Selection};
+pub use arbiter::{Arbiter, ArgmaxArbiter, Selection};
 pub use workspace::{
     Chunk, ChunkId, Processor, ProcessorId, Tick, TickRecord, Workspace, WorkspaceError,
 };
