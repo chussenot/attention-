@@ -61,13 +61,14 @@ impl ScenarioRun {
     }
 }
 
-/// All scenarios, in a stable order. Includes held-out ones; check [`Scenario::held_out`].
+/// Constructors for every scenario, in a stable order. Includes held-out ones; check
+/// [`Scenario::held_out`]. A scenario is consumed by a run, so call a builder per run.
+pub const BUILDERS: [fn() -> Scenario; 3] =
+    [garden_path::build, stable::build, distractor_flood::build];
+
+/// One fresh instance of every scenario, in [`BUILDERS`] order.
 pub fn all() -> Vec<Scenario> {
-    vec![
-        garden_path::build(),
-        stable::build(),
-        distractor_flood::build(),
-    ]
+    BUILDERS.iter().map(|build| build()).collect()
 }
 
 /// Chunk id used by every scripted processor: source in the high 32 bits, tick in the low

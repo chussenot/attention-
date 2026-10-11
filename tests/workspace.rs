@@ -96,7 +96,7 @@ fn candidates_are_ordered_by_processor_id_regardless_of_insertion_order() {
     assert_eq!(sources, vec![2, 5, 7]);
     assert_eq!(record.winner_source, Some(ProcessorId(2)));
     assert_eq!(record.scores, vec![0.2, 0.3, 0.1]);
-    assert_eq!(log.borrow()[0], "select t=0 [P2,P5,P7]");
+    assert_eq!(log.borrow()[0], "select t=0 [proc2,proc5,proc7]");
 }
 
 #[test]
@@ -111,8 +111,8 @@ fn winner_is_broadcast_to_every_processor_including_its_source() {
     ws.step();
 
     let entries = log.borrow();
-    assert!(entries.contains(&"P1 got P1@0 at 0".to_string()));
-    assert!(entries.contains(&"P2 got P1@0 at 0".to_string()));
+    assert!(entries.contains(&"proc1 got proc1@0 at 0".to_string()));
+    assert!(entries.contains(&"proc2 got proc1@0 at 0".to_string()));
 }
 
 #[test]
@@ -198,7 +198,7 @@ impl Processor for ImpostorProcessor {
 }
 
 #[test]
-#[should_panic(expected = "proposed a chunk with source P9")]
+#[should_panic(expected = "proposed a chunk with source proc9")]
 fn chunk_with_foreign_source_panics() {
     let mut ws = Workspace::new(
         vec![Box::new(ImpostorProcessor)],

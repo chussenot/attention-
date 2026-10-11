@@ -17,7 +17,7 @@ pub struct ProcessorId(pub u32);
 
 impl fmt::Display for ProcessorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "P{}", self.0)
+        write!(f, "proc{}", self.0)
     }
 }
 

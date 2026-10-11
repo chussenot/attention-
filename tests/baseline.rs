@@ -45,7 +45,7 @@ fn picks_the_highest_weight_and_reports_weights_as_scores() {
     let selection = ArgmaxArbiter::new().select(&candidates, 0);
     assert_eq!(selection.winner, Some(1));
     assert_eq!(selection.scores, vec![0.2, 0.7, 0.5]);
-    assert!(selection.reason.contains("P1"), "{}", selection.reason);
+    assert!(selection.reason.contains("proc1"), "{}", selection.reason);
 }
 
 #[test]
