@@ -1,6 +1,6 @@
 # Family B: scenario author brief
 
-This is the complete brief for the author of Family B, a held-out scenario family. The
+This is the complete brief for the author of Family B, a family of test scenarios. The
 author receives **this file and the code bundle in §6, and nothing else.**
 
 > **For the commissioner, not part of the author's task.** Give the author only this file and
@@ -12,6 +12,11 @@ author receives **this file and the code bundle in §6, and nothing else.**
 > ledger who or what the author was. Another Claude session has priors correlated with the
 > developer's, so it gives weaker independence than a human author. Never describe the
 > family as fully independent.
+>
+> **Assembling the bundle.** Take the three source files in §6 from the pre-registration
+> merge commit, and record that commit in the ledger. Write `src/lib.rs` and `src/arbiter.rs`
+> exactly as given in §6. Then run the validation in §7 on the assembled bundle itself, not
+> on the repository, before handing it over.
 
 ---
 
@@ -100,10 +105,11 @@ policy.
    - A `Stable` instance has no critical streams.
    - Among seeds 0–199, at least 80 instances must be `Critical` and at least 80 `Stable`.
 7. **Size limits.** `100 ≤ horizon ≤ 1000`, and at most 32 processors per instance.
-8. **Do not run any selection policy**, including the one in `src/arbiter/argmax.rs`, against
-   your scenarios. Do not look for, ask for, or infer information about the policies under
-   test, their parameters, or any results. Do not access any repository other than the
-   bundle you were given.
+8. **Do not implement or run any selection policy** against your scenarios. The bundle
+   contains only the selection *interface* (`src/arbiter.rs`), with no implementation. Do not
+   look for, ask for, or infer information about the policies under test, their parameters,
+   or any results. Work only with this brief and the bundle, outside any repository, without
+   network access.
 
 ## 5. Delivery
 
@@ -113,19 +119,18 @@ and you may fix exactly that.
 
 ## 6. Code bundle
 
-The bundle is the following files, taken unchanged from the commit at which the P2 protocol
-was merged (`docs/experiments/p2-protocol.md`, §8, step 1):
+The bundle contains exactly these files and nothing else:
 
-| File | What it gives you |
-|---|---|
-| `Cargo.toml` | The crate manifest. The crate is std-only: do not add dependencies. |
-| `src/workspace.rs` | `Tick`, `ProcessorId`, `ChunkId`, `Chunk`, the `Processor` trait, `TickRecord`, `Workspace`. |
-| `src/metrics.rs` | `GroundTruth`, `CriticalStream`, and the metric implementations matching §2. |
-| `src/rng.rs` | `SplitMix64`, the only allowed source of randomness. |
-| `src/arbiter/mod.rs`, `src/arbiter/argmax.rs` | Needed only so the crate compiles. Do not run them (§4.8). |
+| File | Source | What it gives you |
+|---|---|---|
+| `Cargo.toml` | Copied unchanged | The crate manifest. The crate is std-only: do not add dependencies. |
+| `src/workspace.rs` | Copied unchanged | `Tick`, `ProcessorId`, `ChunkId`, `Chunk`, the `Processor` trait, `TickRecord`, and `Workspace` (the propose → select → broadcast loop). |
+| `src/metrics.rs` | Copied unchanged | `GroundTruth`, `CriticalStream`, and the metric implementations matching §2. |
+| `src/rng.rs` | Copied unchanged | `SplitMix64`, the only allowed source of randomness. |
+| `src/lib.rs` | Written for the bundle (below) | Declares the modules. |
+| `src/arbiter.rs` | Written for the bundle (below) | The selection **interface only**. `src/workspace.rs` refers to it, so it must exist for the crate to compile. It contains no policy. |
 
-It also includes `src/lib.rs` with exactly this content, replacing the repository's own
-`lib.rs`:
+`src/lib.rs`:
 
 ```rust
 pub mod arbiter;
@@ -135,4 +140,47 @@ pub mod rng;
 pub mod workspace;
 ```
 
-Nothing else from the repository is part of the bundle.
+`src/arbiter.rs`:
+
+```rust
+//! Selection interface for the Family B author bundle.
+//!
+//! `src/workspace.rs` refers to these two items, so they must exist for the crate to compile.
+//! No selection policy is included. Do not implement or run one (brief §4.8).
+
+use crate::workspace::{Chunk, Tick};
+
+/// The interface a selection policy implements. No implementation is provided.
+pub trait Arbiter {
+    fn select(&mut self, candidates: &[Chunk], t: Tick) -> Selection;
+}
+
+/// The outcome of one selection, as stored in a `TickRecord`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Selection {
+    pub winner: Option<usize>,
+    pub scores: Vec<f64>,
+    pub reason: String,
+}
+```
+
+**Deliberately excluded:**
+- every selection-policy implementation, including the repository's `src/arbiter/` directory;
+- the repository's scenario definitions (`src/scenario/`), tests, examples and documentation.
+
+You write `src/family_b.rs` yourself (§4).
+
+## 7. Building and validating the bundle
+
+From the bundle root, with `src/family_b.rs` in place:
+
+```
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+These check that the bundle and your generator compile without warnings, and run the
+bundle's own unit tests (`src/rng.rs`). Requirements 2–7 in §4 are structural: you can check
+them by building instances and inspecting their processors and ground truth, without running
+any selection policy.
