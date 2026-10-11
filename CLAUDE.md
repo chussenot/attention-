@@ -63,9 +63,10 @@ examples/run_scenarios.rs  metrics table per scenario × arbiter
   `distractor_flood` is run**; its results are reported as-is.
 - **P3 — Attention schema.** A meta-processor that predicts the next winner from recent
   records and can bias selection. Compared against P2's hard-coded habituation.
-- **P4 — `jcs-core` adapter.** Maps to sense-making functions F6–F11 and emits metrics using
-  JCS per-function naming. Lives outside this crate's core; this crate never depends on
-  `jcs-core`.
+- **P4 — `jcs-core` adapter.** **Blocked** on an open dependency (see `docs/design.md` §7):
+  the sense-making function definitions and the per-function metric naming must first be
+  imported verbatim, as `docs/jcs-contract.md`, from the external JCS functional architecture
+  document. Lives outside this crate's core; this crate never depends on `jcs-core`.
 
 ## Verification (all must pass before reporting done)
 
@@ -91,3 +92,4 @@ cargo run --example run_scenarios
 - Make claims about consciousness, sentience or awareness in docs, code or comments. Theories
   of consciousness are cited only as sources of *mechanisms*.
 - Depend on `jcs-core`.
+- Never invent or infer JCS function numbering or names.

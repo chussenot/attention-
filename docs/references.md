@@ -102,3 +102,8 @@ identifier checked.
   opportunistic, scrambled).
 - 📚 E. Hollnagel, *FRAM: The Functional Resonance Analysis Method*, Ashgate, 2012. — Later
   candidate for analysing how variability propagates between functions.
+- ✅ G. Klein, K. G. Ross, B. M. Moon, D. E. Klein, R. R. Hoffman & E. Hollnagel,
+  *Macrocognition*, IEEE Intelligent Systems 18(3), 81–85, 2003, doi:10.1109/MIS.2003.1200735.
+  — Context only. Its list of macrocognitive functions is **not** the JCS function numbering
+  (F1–F23 of the JCS functional architecture) and must not be used to fill it in; see
+  `docs/design.md` §7.
