@@ -23,6 +23,9 @@ impl fmt::Display for ProcessorId {
 
 /// Identifies a chunk. Ground truth (which chunks are critical) is keyed by this id and
 /// kept outside the workspace.
+///
+/// Ids must be unique within a run: no two proposed chunks, on any tick or from any processor,
+/// may share one. A re-proposed chunk needs a fresh id. `Scenario::run` enforces this.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ChunkId(pub u64);
 
@@ -43,7 +46,9 @@ pub struct Chunk {
 pub trait Processor {
     fn id(&self) -> ProcessorId;
 
-    /// Proposes at most one chunk for tick `t`. The chunk's `source` must equal `self.id()`.
+    /// Proposes at most one chunk for tick `t`. The chunk's `source` must equal `self.id()`, and
+    /// its id must not have been used by any chunk proposed earlier in the run (see
+    /// [`ChunkId`]).
     fn propose(&mut self, t: Tick) -> Option<Chunk>;
 
     /// Global broadcast: called on every processor (including the winner's source) with the

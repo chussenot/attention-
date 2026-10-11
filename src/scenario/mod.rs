@@ -35,14 +35,24 @@ impl Scenario {
     ///
     /// # Panics
     ///
-    /// If the scenario defines two processors with the same id (a scenario bug).
+    /// If the scenario defines two processors with the same id, or if any chunk id is proposed
+    /// more than once in the run (both scenario bugs). Chunk-id uniqueness is checked here, once
+    /// per run, rather than on every workspace tick.
     pub fn run(self, arbiter: Box<dyn Arbiter>) -> ScenarioRun {
         let mut workspace = Workspace::new(self.processors, arbiter)
             .unwrap_or_else(|e| panic!("scenario {}: {e}", self.name));
+        let records = workspace.run(self.horizon);
+        if let Some(id) = metrics::duplicate_chunk_id(&records) {
+            panic!(
+                "scenario {}: chunk id {id:?} was proposed more than once; chunk ids must be \
+                 unique within a run",
+                self.name
+            );
+        }
         ScenarioRun {
             name: self.name,
             held_out: self.held_out,
-            records: workspace.run(self.horizon),
+            records,
             truth: self.truth,
         }
     }
@@ -75,8 +85,13 @@ pub fn all() -> Vec<Scenario> {
 /// Chunk id used by every scripted processor: source in the high 32 bits, tick in the low
 /// 32. This lets a scenario enumerate its critical chunk ids up front. It reveals only the
 /// source and tick, both already visible on the chunk.
+///
+/// # Panics
+///
+/// If `t` does not fit in 32 bits. The check runs in every build: in release, an unchecked
+/// tick above `u32::MAX` would overlap the source bits and produce colliding ids.
 pub fn chunk_id(source: ProcessorId, t: Tick) -> ChunkId {
-    debug_assert!(
+    assert!(
         t <= u64::from(u32::MAX),
         "tick {t} does not fit the chunk id encoding"
     );

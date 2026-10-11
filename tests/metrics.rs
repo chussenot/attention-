@@ -299,3 +299,60 @@ fn evaluate_on_empty_input() {
     assert_eq!(m.score_entropy.mean, None);
     assert!(!m.any_missed());
 }
+
+// --- large finite scores and chunk-id uniqueness ---------------------------------------------
+
+#[test]
+fn entropy_is_correct_for_large_finite_scores() {
+    // Equal scores: one bit, however large (the unscaled sum overflowed to infinity).
+    let h = tick_entropy(&[1e308, 1e308]).unwrap();
+    assert!((h - 1.0).abs() < EPS, "got {h}");
+    let h = tick_entropy(&[f64::MAX; 4]).unwrap();
+    assert!((h - 2.0).abs() < EPS, "got {h}");
+    // [1e308, 5e307] → p = [2/3, 1/3].
+    let expected = -(2.0f64 / 3.0 * (2.0f64 / 3.0).log2() + 1.0 / 3.0 * (1.0f64 / 3.0).log2());
+    let h = tick_entropy(&[1e308, 5e307]).unwrap();
+    assert!((h - expected).abs() < EPS, "got {h}, expected {expected}");
+    // Shifting extreme negative scores must not overflow either: [−MAX, MAX] → [0, 2] → 0 bits.
+    assert_eq!(tick_entropy(&[-f64::MAX, f64::MAX]), Some(0.0));
+    let h = tick_entropy(&[-f64::MAX, -f64::MAX]).unwrap();
+    assert!((h - 1.0).abs() < EPS);
+}
+
+#[test]
+fn entropy_is_unchanged_by_scaling() {
+    for scores in [vec![0.9, 0.3], vec![0.2, 0.25, 0.9], vec![-0.4, 0.1, 0.7]] {
+        let base = tick_entropy(&scores).unwrap();
+        for k in [1e-300, 1e-6, 1e6, 1e300] {
+            let scaled: Vec<f64> = scores.iter().map(|s| s * k).collect();
+            let h = tick_entropy(&scaled).unwrap();
+            assert!((h - base).abs() < 1e-9, "{scores:?} × {k}: {h} vs {base}");
+        }
+    }
+}
+
+#[test]
+fn duplicate_chunk_ids_are_detected() {
+    let unique = vec![
+        record(0, vec![chunk(1, 10, 0.9), chunk(2, 20, 0.3)], Some(0)),
+        record(1, vec![chunk(1, 11, 0.9), chunk(2, 21, 0.3)], Some(0)),
+    ];
+    assert_eq!(metrics::duplicate_chunk_id(&unique), None);
+
+    // Reused across ticks by the same source.
+    let across_ticks = vec![
+        record(0, vec![chunk(1, 10, 0.9)], Some(0)),
+        record(1, vec![chunk(1, 10, 0.9)], Some(0)),
+    ];
+    assert_eq!(
+        metrics::duplicate_chunk_id(&across_ticks),
+        Some(ChunkId(10))
+    );
+
+    // Reused by two sources on the same tick.
+    let across_sources = vec![record(0, vec![chunk(1, 7, 0.9), chunk(2, 7, 0.3)], Some(0))];
+    assert_eq!(
+        metrics::duplicate_chunk_id(&across_sources),
+        Some(ChunkId(7))
+    );
+}

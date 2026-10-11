@@ -174,3 +174,69 @@ fn only_distractor_flood_is_held_out() {
         .collect();
     assert_eq!(held_out, vec!["distractor_flood"]);
 }
+
+#[test]
+#[should_panic(expected = "proposed more than once")]
+fn scenario_run_rejects_reused_chunk_ids() {
+    use attn_workspace::Processor;
+    use attn_workspace::metrics::GroundTruth;
+    use attn_workspace::scenario::Scenario;
+
+    /// Proposes the same chunk id on every tick: a contract violation.
+    struct Reuser;
+    impl Processor for Reuser {
+        fn id(&self) -> ProcessorId {
+            ProcessorId(0)
+        }
+        fn propose(&mut self, _t: Tick) -> Option<Chunk> {
+            Some(Chunk {
+                id: ChunkId(7),
+                source: ProcessorId(0),
+                weight: 0.5,
+                payload: "A".to_string(),
+            })
+        }
+        fn receive(&mut self, _winner: &Chunk, _t: Tick) {}
+    }
+
+    let scenario = Scenario {
+        name: "reuser",
+        description: "reuses a chunk id",
+        horizon: 3,
+        held_out: false,
+        processors: vec![Box::new(Reuser)],
+        truth: GroundTruth::default(),
+    };
+    scenario.run(Box::new(NullArbiter));
+}
+
+#[test]
+fn every_scenario_and_development_instance_has_unique_chunk_ids() {
+    use attn_workspace::metrics::duplicate_chunk_id;
+    use attn_workspace::scenario::family_g::{self, DEV_SEEDS};
+    // Scenario::run already panics on a duplicate; checking explicitly documents the property.
+    for s in scenario::all() {
+        let run = run(s);
+        assert_eq!(duplicate_chunk_id(&run.records), None, "{}", run.name);
+    }
+    for seed in DEV_SEEDS {
+        let run = run(family_g::instance(seed).0);
+        assert_eq!(
+            duplicate_chunk_id(&run.records),
+            None,
+            "family G seed {seed}"
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "does not fit the chunk id encoding")]
+fn chunk_id_rejects_ticks_beyond_32_bits() {
+    let _ = scenario::chunk_id(ProcessorId(0), 1u64 << 32);
+}
+
+#[test]
+fn chunk_id_accepts_the_largest_encodable_tick() {
+    let id = scenario::chunk_id(ProcessorId(1), u64::from(u32::MAX));
+    assert_eq!(id, ChunkId((1u64 << 32) | u64::from(u32::MAX)));
+}
