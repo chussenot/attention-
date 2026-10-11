@@ -50,60 +50,239 @@ fn value(grid: &Grid, arm: Arm, c: usize, i: usize, metric: Metric) -> Option<f6
     }
 }
 
-/// Per-instance values: for each instance, the mean over `configs` of the contrast, skipping
-/// configurations where any arm's value is undefined. `None` if every configuration is skipped
-/// or the instance's stratum does not feed this metric.
+/// One instance's value for an estimand, with how many configurations it used or skipped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InstanceValue {
+    /// Mean over the used configurations; `None` if all were skipped or the instance's stratum
+    /// does not feed this metric.
+    pub value: Option<f64>,
+    /// Whether the instance's stratum feeds this metric.
+    pub relevant: bool,
+    pub used: u32,
+    /// Configurations skipped because some arm's value was undefined (Amendment 1, item 8).
+    pub skipped: u32,
+}
+
+/// Per-instance values with skip counts: for each instance, the mean over `configs` of the
+/// contrast, skipping configurations where any arm's value is undefined.
+pub fn per_instance_detail(
+    grid: &Grid,
+    contrast: &Contrast,
+    metric: Metric,
+    configs: &[usize],
+) -> Vec<InstanceValue> {
+    (0..grid.instances.len())
+        .map(|i| {
+            let stratum = &grid.strata[grid.instances[i].stratum];
+            if !metric.uses_stratum(stratum.critical) {
+                return InstanceValue {
+                    value: None,
+                    relevant: false,
+                    used: 0,
+                    skipped: 0,
+                };
+            }
+            let mut sum = 0.0;
+            let mut used = 0u32;
+            let mut skipped = 0u32;
+            'configs: for &c in configs {
+                let mut total = 0.0;
+                for &(arm, coef) in &contrast.0 {
+                    match value(grid, arm, c, i, metric) {
+                        Some(v) => total += coef * v,
+                        None => {
+                            skipped += 1;
+                            continue 'configs;
+                        }
+                    }
+                }
+                sum += total;
+                used += 1;
+            }
+            InstanceValue {
+                value: (used > 0).then(|| sum / f64::from(used)),
+                relevant: true,
+                used,
+                skipped,
+            }
+        })
+        .collect()
+}
+
+/// Per-instance values only. See [`per_instance_detail`].
 pub fn per_instance(
     grid: &Grid,
     contrast: &Contrast,
     metric: Metric,
     configs: &[usize],
 ) -> Vec<Option<f64>> {
-    (0..grid.instances.len())
-        .map(|i| {
-            let stratum = &grid.strata[grid.instances[i].stratum];
-            if !metric.uses_stratum(stratum.critical) {
-                return None;
-            }
-            let mut sum = 0.0;
-            let mut n = 0usize;
-            'configs: for &c in configs {
-                let mut total = 0.0;
-                for &(arm, coef) in &contrast.0 {
-                    match value(grid, arm, c, i, metric) {
-                        Some(v) => total += coef * v,
-                        None => continue 'configs,
-                    }
-                }
-                sum += total;
-                n += 1;
-            }
-            (n > 0).then(|| sum / n as f64)
-        })
+    per_instance_detail(grid, contrast, metric, configs)
+        .iter()
+        .map(|v| v.value)
         .collect()
 }
 
-/// Stratum-weighted mean (§5.1): the mean of defined values within each stratum that feeds the
-/// metric, then the unweighted mean over those strata. `members` lists instance indices per
-/// stratum (original or resampled). Sums run in the given order.
+/// Stratum-weighted mean (§5.1), with the number of strata that feed the metric but had no
+/// defined value. Those strata are left out of the average (Amendment 1, item 8), which changes
+/// the target population; callers must surface a non-zero count (Amendment 2).
+pub fn weighted_detail(
+    grid: &Grid,
+    values: &[Option<f64>],
+    metric: Metric,
+    members: &[Vec<usize>],
+) -> (Option<f64>, u32) {
+    let mut stratum_means = Vec::new();
+    let mut without_data = 0u32;
+    for (s, list) in members.iter().enumerate() {
+        if !metric.uses_stratum(grid.strata[s].critical) {
+            continue;
+        }
+        let defined: Vec<f64> = list.iter().filter_map(|&i| values[i]).collect();
+        if defined.is_empty() {
+            without_data += 1;
+        } else {
+            stratum_means.push(defined.iter().sum::<f64>() / defined.len() as f64);
+        }
+    }
+    let mean = (!stratum_means.is_empty())
+        .then(|| stratum_means.iter().sum::<f64>() / stratum_means.len() as f64);
+    (mean, without_data)
+}
+
+/// Stratum-weighted mean (§5.1). See [`weighted_detail`] for the strata it leaves out.
 pub fn weighted(
     grid: &Grid,
     values: &[Option<f64>],
     metric: Metric,
     members: &[Vec<usize>],
 ) -> Option<f64> {
-    let mut stratum_means = Vec::new();
-    for (s, list) in members.iter().enumerate() {
-        if !metric.uses_stratum(grid.strata[s].critical) {
-            continue;
+    weighted_detail(grid, values, metric, members).0
+}
+
+/// What an estimate covers (Amendment 2). Counts are over the strata that feed the metric.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Coverage {
+    pub instances: u32,
+    /// Instances with no defined value at all; left out of their stratum's mean.
+    pub excluded_instances: u32,
+    /// Instances where some configurations were used and others skipped. Undefined values in
+    /// P2 depend only on the instance, not the arm, so this should be 0; a non-zero count means
+    /// arm-dependent missingness.
+    pub partially_defined_instances: u32,
+    /// (configuration, instance) cells skipped.
+    pub skipped_cells: u64,
+    /// Strata with no defined value, left out of the point estimate's average.
+    pub strata_without_data: u32,
+    /// Bootstrap replicates in which some stratum had no defined value.
+    pub replicates_dropping_stratum: u32,
+    /// Bootstrap replicates with no defined value at all (left out of the interval).
+    pub replicates_undefined: u32,
+}
+
+impl Coverage {
+    /// The estimate describes the declared target population: no stratum left out, in the point
+    /// estimate or any replicate, and no arm-dependent missingness. Excluded instances alone do
+    /// not make it incomplete (complete-case within a stratum), but they are always reported.
+    pub fn complete(&self) -> bool {
+        self.strata_without_data == 0
+            && self.partially_defined_instances == 0
+            && self.replicates_dropping_stratum == 0
+            && self.replicates_undefined == 0
+    }
+
+    /// One-line summary for reports.
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if self.excluded_instances > 0 {
+            parts.push(format!(
+                "{}/{} instances excluded",
+                self.excluded_instances, self.instances
+            ));
         }
-        let defined: Vec<f64> = list.iter().filter_map(|&i| values[i]).collect();
-        if !defined.is_empty() {
-            stratum_means.push(defined.iter().sum::<f64>() / defined.len() as f64);
+        if self.skipped_cells > 0 {
+            parts.push(format!("{} cells skipped", self.skipped_cells));
+        }
+        if self.partially_defined_instances > 0 {
+            parts.push(format!(
+                "{} partially defined instances (arm-dependent missingness)",
+                self.partially_defined_instances
+            ));
+        }
+        if self.strata_without_data > 0 {
+            parts.push(format!(
+                "{} strata without data (population changed)",
+                self.strata_without_data
+            ));
+        }
+        if self.replicates_dropping_stratum > 0 {
+            parts.push(format!(
+                "{} replicates dropped a stratum",
+                self.replicates_dropping_stratum
+            ));
+        }
+        if self.replicates_undefined > 0 {
+            parts.push(format!(
+                "{} replicates undefined",
+                self.replicates_undefined
+            ));
+        }
+        if parts.is_empty() {
+            "complete".to_string()
+        } else if self.complete() {
+            format!("complete; {}", parts.join("; "))
+        } else {
+            format!("INCOMPLETE: {}", parts.join("; "))
         }
     }
-    (!stratum_means.is_empty())
-        .then(|| stratum_means.iter().sum::<f64>() / stratum_means.len() as f64)
+}
+
+/// Per-stratum missingness for one metric over every arm and configuration of a grid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StratumCoverage {
+    pub label: String,
+    pub instances: u32,
+    /// Instances where at least one run has an undefined value.
+    pub undefined_in_some_run: u32,
+    /// Instances where every run has an undefined value.
+    pub undefined_in_every_run: u32,
+}
+
+/// Missingness table for one metric (Amendment 2): one row per stratum that feeds it.
+pub fn stratum_coverage(grid: &Grid, metric: Metric) -> Vec<StratumCoverage> {
+    let members = grid.members();
+    grid.strata
+        .iter()
+        .enumerate()
+        .filter(|(_, st)| metric.uses_stratum(st.critical))
+        .map(|(s, st)| {
+            let mut some = 0u32;
+            let mut every = 0u32;
+            for &i in &members[s] {
+                let mut defined = 0usize;
+                let mut total = 0usize;
+                for (&arm, per_config) in &grid.runs {
+                    for c in 0..per_config.len() {
+                        total += 1;
+                        if value(grid, arm, c, i, metric).is_some() {
+                            defined += 1;
+                        }
+                    }
+                }
+                if defined < total {
+                    some += 1;
+                }
+                if defined == 0 {
+                    every += 1;
+                }
+            }
+            StratumCoverage {
+                label: st.label.clone(),
+                instances: members[s].len() as u32,
+                undefined_in_some_run: some,
+                undefined_in_every_run: every,
+            }
+        })
+        .collect()
 }
 
 /// A point estimate with a percentile bootstrap interval.
@@ -113,6 +292,7 @@ pub struct Estimate {
     pub lo: f64,
     pub hi: f64,
     pub level: Level,
+    pub coverage: Coverage,
 }
 
 /// Stratified resamples for a grid (§5.2): `RESAMPLES` draws from
@@ -125,7 +305,8 @@ pub fn resamples_for(grid: &Grid) -> Vec<Vec<Vec<usize>>> {
     )
 }
 
-/// Estimate of `contrast` on `metric`, averaged over `configs`, with an interval at `level`.
+/// Estimate of `contrast` on `metric`, averaged over `configs`, with an interval at `level`
+/// and its coverage (Amendment 2). `None` only when no instance has a defined value.
 pub fn estimate(
     grid: &Grid,
     resamples: &[Vec<Vec<usize>>],
@@ -134,12 +315,37 @@ pub fn estimate(
     configs: &[usize],
     level: Level,
 ) -> Option<Estimate> {
-    let values = per_instance(grid, contrast, metric, configs);
-    let point = weighted(grid, &values, metric, &grid.members())?;
-    let replicates: Vec<f64> = resamples
-        .iter()
-        .filter_map(|r| weighted(grid, &values, metric, r))
-        .collect();
+    let detail = per_instance_detail(grid, contrast, metric, configs);
+    let values: Vec<Option<f64>> = detail.iter().map(|v| v.value).collect();
+    let (point, strata_without_data) = weighted_detail(grid, &values, metric, &grid.members());
+    let point = point?;
+
+    let mut coverage = Coverage {
+        strata_without_data,
+        ..Coverage::default()
+    };
+    for v in detail.iter().filter(|v| v.relevant) {
+        coverage.instances += 1;
+        coverage.skipped_cells += u64::from(v.skipped);
+        if v.value.is_none() {
+            coverage.excluded_instances += 1;
+        } else if v.skipped > 0 {
+            coverage.partially_defined_instances += 1;
+        }
+    }
+
+    let mut replicates = Vec::with_capacity(resamples.len());
+    for r in resamples {
+        match weighted_detail(grid, &values, metric, r) {
+            (Some(x), dropped) => {
+                if dropped > 0 {
+                    coverage.replicates_dropping_stratum += 1;
+                }
+                replicates.push(x);
+            }
+            (None, _) => coverage.replicates_undefined += 1,
+        }
+    }
     if replicates.is_empty() {
         return None;
     }
@@ -149,6 +355,7 @@ pub fn estimate(
         lo,
         hi,
         level,
+        coverage,
     })
 }
 
@@ -322,6 +529,8 @@ pub const DESCRIPTIVE_LEVEL: Level = LEVEL_95;
 /// Verdict on a mechanism hypothesis from its primary miss-rate interval (§2.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MechanismVerdict {
+    /// The estimate does not describe the declared target population (Amendment 2): no verdict.
+    Undecidable,
     /// Upper bound below zero. For H3 this means complementary.
     Supported,
     /// H3 only: lower bound above zero.
@@ -331,7 +540,9 @@ pub enum MechanismVerdict {
 }
 
 pub fn mechanism_verdict(m: Mechanism, e: &Estimate) -> MechanismVerdict {
-    if e.hi < 0.0 {
+    if !e.coverage.complete() {
+        MechanismVerdict::Undecidable
+    } else if e.hi < 0.0 {
         MechanismVerdict::Supported
     } else if m == Mechanism::H3Interaction && e.lo > 0.0 {
         MechanismVerdict::Redundant
@@ -340,17 +551,47 @@ pub fn mechanism_verdict(m: Mechanism, e: &Estimate) -> MechanismVerdict {
     }
 }
 
+/// H6 outcome for one mechanism.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum H6Verdict {
+    /// The mechanism was not supported on development data.
+    NotApplicable,
+    Supported,
+    NotSupported,
+    /// A held-out estimate is missing or does not describe its declared population
+    /// (Amendment 2).
+    Undecidable,
+}
+
 /// H6 for one mechanism (§2.2): applicable only if supported on development data; supported
 /// if every held-out interval excludes zero in the same (negative) direction.
-pub fn h6_supported(dev: MechanismVerdict, heldout: &[Estimate]) -> Option<bool> {
-    (dev == MechanismVerdict::Supported)
-        .then(|| !heldout.is_empty() && heldout.iter().all(|e| e.hi < 0.0))
+pub fn h6_verdict(dev: MechanismVerdict, heldout: &[Option<Estimate>]) -> H6Verdict {
+    if dev != MechanismVerdict::Supported {
+        return H6Verdict::NotApplicable;
+    }
+    if heldout.is_empty()
+        || heldout
+            .iter()
+            .any(|e| e.is_none_or(|e| !e.coverage.complete()))
+    {
+        return H6Verdict::Undecidable;
+    }
+    if heldout.iter().flatten().all(|e| e.hi < 0.0) {
+        H6Verdict::Supported
+    } else {
+        H6Verdict::NotSupported
+    }
 }
 
 /// H7 on one held-out set (§2.2): miss-rate interval below zero and switch-rate increase upper
-/// bound at most the provisional margin.
-pub fn h7_supported_on(miss: &Estimate, switch: &Estimate) -> bool {
-    miss.hi < 0.0 && switch.hi <= SWITCH_TARGET
+/// bound at most the provisional margin. `None` (undecidable) if either estimate is missing or
+/// does not describe its declared population (Amendment 2).
+pub fn h7_on(miss: Option<&Estimate>, switch: Option<&Estimate>) -> Option<bool> {
+    let (miss, switch) = (miss?, switch?);
+    if !miss.coverage.complete() || !switch.coverage.complete() {
+        return None;
+    }
+    Some(miss.hi < 0.0 && switch.hi <= SWITCH_TARGET)
 }
 
 /// H5 for one arm (§2.2): pass-fraction Wilson 95% lower bound at least the target.
@@ -441,14 +682,14 @@ pub fn arm_candidates(grid: &Grid, arm: Arm) -> Vec<Candidate> {
     let members = grid.members();
     (0..grid.n_configs(arm))
         .map(|c| {
+            // A rate over an incomplete population (a stratum without data) is treated as
+            // undefined, i.e. +∞ (Amendment 1, item 8; Amendment 2).
             let rate = |metric| {
-                weighted(
-                    grid,
-                    &per_instance(grid, &Contrast::arm(arm), metric, &[c]),
-                    metric,
-                    &members,
-                )
-                .unwrap_or(f64::INFINITY)
+                let values = per_instance(grid, &Contrast::arm(arm), metric, &[c]);
+                match weighted_detail(grid, &values, metric, &members) {
+                    (Some(x), 0) => x,
+                    _ => f64::INFINITY,
+                }
             };
             Candidate {
                 index: c as u64,
@@ -514,38 +755,199 @@ mod tests {
             lo,
             hi,
             level: MECHANISM_LEVEL,
+            coverage: Coverage::default(),
         };
+        let incomplete = |lo, hi| Estimate {
+            coverage: Coverage {
+                strata_without_data: 1,
+                ..Coverage::default()
+            },
+            ..e(lo, hi)
+        };
+        use MechanismVerdict::*;
         assert_eq!(
             mechanism_verdict(Mechanism::H1Habituation, &e(-0.3, -0.1)),
-            MechanismVerdict::Supported
+            Supported
         );
         assert_eq!(
             mechanism_verdict(Mechanism::H1Habituation, &e(-0.3, 0.1)),
-            MechanismVerdict::NotSupported
+            NotSupported
         );
         assert_eq!(
             mechanism_verdict(Mechanism::H1Habituation, &e(0.1, 0.3)),
-            MechanismVerdict::NotSupported
+            NotSupported
         );
         assert_eq!(
             mechanism_verdict(Mechanism::H3Interaction, &e(0.1, 0.3)),
-            MechanismVerdict::Redundant
+            Redundant
+        );
+        // An incomplete population never yields a verdict, however clear the interval.
+        assert_eq!(
+            mechanism_verdict(Mechanism::H1Habituation, &incomplete(-0.3, -0.1)),
+            Undecidable
+        );
+
+        let ok = Some(e(-1.0, -0.5));
+        assert_eq!(h6_verdict(NotSupported, &[ok]), H6Verdict::NotApplicable);
+        assert_eq!(
+            h6_verdict(Supported, &[ok, Some(e(-1.0, 0.1))]),
+            H6Verdict::NotSupported
         );
         assert_eq!(
-            h6_supported(MechanismVerdict::NotSupported, &[e(-1.0, -0.5)]),
+            h6_verdict(Supported, &[ok, Some(e(-1.0, -0.1))]),
+            H6Verdict::Supported
+        );
+        assert_eq!(h6_verdict(Supported, &[ok, None]), H6Verdict::Undecidable);
+        assert_eq!(
+            h6_verdict(Supported, &[ok, Some(incomplete(-1.0, -0.1))]),
+            H6Verdict::Undecidable
+        );
+
+        assert_eq!(h7_on(Some(&e(-0.4, -0.1)), Some(&e(0.0, 2.5))), Some(true));
+        assert_eq!(h7_on(Some(&e(-0.4, -0.1)), Some(&e(0.0, 2.6))), Some(false));
+        assert_eq!(
+            h7_on(Some(&incomplete(-0.4, -0.1)), Some(&e(0.0, 2.5))),
             None
         );
-        assert_eq!(
-            h6_supported(MechanismVerdict::Supported, &[e(-1.0, -0.5), e(-1.0, 0.1)]),
-            Some(false)
-        );
-        assert_eq!(
-            h6_supported(MechanismVerdict::Supported, &[e(-1.0, -0.5), e(-1.0, -0.1)]),
-            Some(true)
-        );
-        assert!(h7_supported_on(&e(-0.4, -0.1), &e(0.0, 2.5)));
-        assert!(!h7_supported_on(&e(-0.4, -0.1), &e(0.0, 2.6)));
+        assert_eq!(h7_on(None, Some(&e(0.0, 2.5))), None);
         assert!(!h5_met(103, 512).0 && h5_met(140, 512).0);
+    }
+
+    /// A grid with one critical stratum and two stable strata, where one stable stratum has no
+    /// defined switch rate at all and one instance of the other is undefined.
+    fn grid_with_missing_values() -> Grid {
+        let strata = vec![
+            Stratum {
+                label: "X".into(),
+                critical: true,
+            },
+            Stratum {
+                label: "Y".into(),
+                critical: false,
+            },
+            Stratum {
+                label: "Z".into(),
+                critical: false,
+            },
+        ];
+        let instances: Vec<Instance> = [(0, 0), (1, 0), (2, 1), (3, 1), (4, 2)]
+            .iter()
+            .map(|&(seed, stratum)| Instance { seed, stratum })
+            .collect();
+        let crit = |missed| RunOutcome {
+            missed: Some(missed),
+            latency: None,
+            switch_rate: None,
+            switch_count: 0,
+            eligible: 0,
+            longest_streak: 0,
+        };
+        let stab = |rate: Option<f64>| RunOutcome {
+            missed: None,
+            latency: None,
+            switch_rate: rate,
+            switch_count: 0,
+            eligible: u64::from(rate.is_some()) * 199,
+            longest_streak: 0,
+        };
+        let row = || {
+            vec![
+                crit(true),
+                crit(false),
+                stab(Some(4.0)),
+                stab(None),
+                stab(None),
+            ]
+        };
+        let mut runs = BTreeMap::new();
+        runs.insert(Arm::A0, vec![row()]);
+        runs.insert(Arm::A1, vec![row(), row()]);
+        Grid {
+            name: "missing".into(),
+            set_id: 0,
+            strata,
+            instances,
+            runs,
+        }
+    }
+
+    #[test]
+    fn coverage_exposes_excluded_instances_and_dropped_strata() {
+        let g = grid_with_missing_values();
+        let r = resamples_for(&g);
+        let e = estimate(
+            &g,
+            &r,
+            &Contrast::arm(Arm::A1),
+            Metric::SwitchRate,
+            &[0, 1],
+            LEVEL_95,
+        )
+        .unwrap();
+        // Stratum Z has no defined value: the point is Y's mean only, and that is visible.
+        assert_eq!(e.point, 4.0);
+        assert_eq!(e.coverage.instances, 3);
+        assert_eq!(e.coverage.excluded_instances, 2);
+        assert_eq!(e.coverage.strata_without_data, 1);
+        assert_eq!(e.coverage.skipped_cells, 4);
+        assert!(!e.coverage.complete());
+        assert!(e.coverage.describe().starts_with("INCOMPLETE"));
+
+        let table = stratum_coverage(&g, Metric::SwitchRate);
+        assert_eq!(
+            table,
+            vec![
+                StratumCoverage {
+                    label: "Y".into(),
+                    instances: 2,
+                    undefined_in_some_run: 1,
+                    undefined_in_every_run: 1
+                },
+                StratumCoverage {
+                    label: "Z".into(),
+                    instances: 1,
+                    undefined_in_some_run: 1,
+                    undefined_in_every_run: 1
+                },
+            ]
+        );
+        // A rate over an incomplete population is treated as undefined for selection.
+        assert!(
+            arm_candidates(&g, Arm::A1)
+                .iter()
+                .all(|c| c.switch == f64::INFINITY)
+        );
+        // The critical side is unaffected and complete.
+        let m = estimate(
+            &g,
+            &r,
+            &Contrast::arm(Arm::A1),
+            Metric::Miss,
+            &[0, 1],
+            LEVEL_95,
+        )
+        .unwrap();
+        assert!(m.coverage.complete(), "{}", m.coverage.describe());
+    }
+
+    #[test]
+    fn arm_dependent_missingness_is_flagged() {
+        let mut g = grid_with_missing_values();
+        // Make A1's config 1 undefined on instance 2 only: that instance becomes partially
+        // defined (config 0 used, config 1 skipped) for any contrast involving A1.
+        g.runs.get_mut(&Arm::A1).unwrap()[1][2].switch_rate = None;
+        let r = resamples_for(&g);
+        let e = estimate(
+            &g,
+            &r,
+            &Contrast::arm(Arm::A1),
+            Metric::SwitchRate,
+            &[0, 1],
+            LEVEL_95,
+        )
+        .unwrap();
+        assert_eq!(e.coverage.partially_defined_instances, 1);
+        assert!(!e.coverage.complete());
     }
 
     /// Two critical strata and one stable stratum; three arms with hand-set outcomes.

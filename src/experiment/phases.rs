@@ -4,8 +4,8 @@
 use std::fmt::Write as _;
 
 use super::analysis::{
-    self, Branch, Contrast, DESCRIPTIVE_LEVEL, Estimate, MECHANISM_LEVEL, Mechanism,
-    MechanismVerdict, Metric,
+    self, Branch, Contrast, Coverage, DESCRIPTIVE_LEVEL, Estimate, MECHANISM_LEVEL, Mechanism,
+    MechanismVerdict, Metric, StratumCoverage,
 };
 use super::arms::{Arm, ParamVector, VECTOR_SEED, shared_vectors};
 use super::grid::{Grid, Instance, RunOutcome, SetSpec, Stratum, run_grid, run_one};
@@ -145,6 +145,8 @@ pub struct CaseStudy {
 }
 
 pub struct DevResults {
+    /// Per-stratum missingness for each metric over every run (Amendment 2).
+    pub coverage_tables: Vec<(Metric, Vec<StratumCoverage>)>,
     pub smoke: Option<Smoke>,
     pub vectors: Vec<ParamVector>,
     pub sanity: Sanity,
@@ -394,6 +396,16 @@ pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults 
     DevResults {
         smoke,
         floor_diagnostic: analysis::floor_diagnostic(&grid, &all),
+        coverage_tables: vec![
+            (
+                Metric::Miss,
+                analysis::stratum_coverage(&grid, Metric::Miss),
+            ),
+            (
+                Metric::SwitchRate,
+                analysis::stratum_coverage(&grid, Metric::SwitchRate),
+            ),
+        ],
         vectors,
         sanity,
         mechanisms,
@@ -409,17 +421,123 @@ pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults 
 // Rendering
 // ---------------------------------------------------------------------------------------
 
+/// Marks an estimate whose coverage is not trivially complete: `†` when instances or cells
+/// were excluded but the population is intact, `⚠` when the population is incomplete
+/// (Amendment 2). Details are listed in the report's coverage section.
+fn coverage_mark(c: &Coverage) -> &'static str {
+    if !c.complete() {
+        " ⚠"
+    } else if c.excluded_instances > 0 || c.skipped_cells > 0 {
+        " †"
+    } else {
+        ""
+    }
+}
+
 fn fmt_est(e: &Option<Estimate>) -> String {
     match e {
-        Some(e) => format!("{:+.4} [{:+.4}, {:+.4}]", e.point, e.lo, e.hi),
-        None => "–".to_string(),
+        Some(e) => format!(
+            "{:+.4} [{:+.4}, {:+.4}]{}",
+            e.point,
+            e.lo,
+            e.hi,
+            coverage_mark(&e.coverage)
+        ),
+        None => "– (no defined value)".to_string(),
     }
 }
 
 fn fmt_rate(e: &Option<Estimate>) -> String {
     match e {
-        Some(e) => format!("{:.4} [{:.4}, {:.4}]", e.point, e.lo, e.hi),
-        None => "–".to_string(),
+        Some(e) => format!(
+            "{:.4} [{:.4}, {:.4}]{}",
+            e.point,
+            e.lo,
+            e.hi,
+            coverage_mark(&e.coverage)
+        ),
+        None => "– (no defined value)".to_string(),
+    }
+}
+
+/// Every reported estimate with a label, for the coverage section.
+fn all_estimates(r: &DevResults) -> Vec<(String, Option<Estimate>)> {
+    let mut out = Vec::new();
+    for m in &r.mechanisms {
+        let h = m.mechanism.label();
+        out.push((format!("{h} miss-rate estimand"), Some(m.miss)));
+        out.push((format!("{h} switch-rate contrast"), m.switch));
+        for (label, miss, switch) in &m.simple {
+            out.push((format!("{h} {label}, miss"), *miss));
+            out.push((format!("{h} {label}, switch"), *switch));
+        }
+    }
+    for (t, e) in r.h4_by_tercile.iter().enumerate() {
+        out.push((format!("H4 τ tercile {}", t + 1), *e));
+    }
+    for p in &r.policies {
+        out.push((format!("{} miss rate at c*", p.arm), p.miss));
+        out.push((format!("{} switch rate at c*", p.arm), p.switch));
+        out.push((format!("{} miss − A0", p.arm), p.miss_vs_a0));
+        out.push((format!("{} switch − A0", p.arm), p.switch_vs_a0));
+    }
+    out
+}
+
+fn render_coverage(s: &mut String, r: &DevResults) {
+    let _ = writeln!(
+        s,
+        "## Coverage and exclusions (Amendment 1 item 8, Amendment 2)
+"
+    );
+    let _ = writeln!(
+        s,
+        "Undefined values are excluded, never imputed. Rows below show, per stratum, how many \
+         instances had an undefined value in at least one run, or in every run.\n"
+    );
+    for (metric, table) in &r.coverage_tables {
+        let name = match metric {
+            Metric::Miss => "Critical miss (critical strata)",
+            Metric::SwitchRate => "Switch rate (stable strata)",
+        };
+        let _ = writeln!(s, "**{name}**\n");
+        let _ = writeln!(
+            s,
+            "| Stratum | Instances | Undefined in some run | Undefined in every run |"
+        );
+        let _ = writeln!(s, "|---|---:|---:|---:|");
+        for row in table {
+            let _ = writeln!(
+                s,
+                "| {} | {} | {} | {} |",
+                row.label, row.instances, row.undefined_in_some_run, row.undefined_in_every_run
+            );
+        }
+        let _ = writeln!(s);
+    }
+    let flagged: Vec<(String, String)> = all_estimates(r)
+        .into_iter()
+        .filter_map(|(label, e)| match e {
+            None => Some((label, "no defined value".to_string())),
+            Some(e) if e.coverage.describe() != "complete" => Some((label, e.coverage.describe())),
+            Some(_) => None,
+        })
+        .collect();
+    if flagged.is_empty() {
+        let _ = writeln!(
+            s,
+            "Every reported estimate covers its full declared population: no excluded instance, \
+             no skipped cell, no stratum without data, no affected bootstrap replicate.\n"
+        );
+    } else {
+        let _ = writeln!(
+            s,
+            "Estimates with exclusions (†) or an incomplete population (⚠, no verdict):\n"
+        );
+        for (label, desc) in flagged {
+            let _ = writeln!(s, "- {label}: {desc}");
+        }
+        let _ = writeln!(s);
     }
 }
 
@@ -430,6 +548,7 @@ fn verdict_label(m: Mechanism, v: MechanismVerdict) -> &'static str {
         (_, MechanismVerdict::Redundant) => "redundant",
         (Mechanism::H3Interaction, MechanismVerdict::NotSupported) => "inconclusive",
         (_, MechanismVerdict::NotSupported) => "not supported",
+        (_, MechanismVerdict::Undecidable) => "undecidable (incomplete population, Amendment 2)",
     }
 }
 
@@ -467,6 +586,8 @@ pub fn render_dev_report(r: &DevResults) -> String {
         "\nValues: A0 miss on C1–C3 = {:.4}; RR switch rate on C4 = {:.2} per 100; RR miss on C3 = {:.4}.\n",
         r.sanity.a0_miss_c1_c3, r.sanity.rr_switch_c4, r.sanity.rr_miss_c3
     );
+
+    render_coverage(&mut s, r);
 
     let _ = writeln!(s, "## Mechanism hypotheses H1–H4 (§2.1)\n");
     let _ = writeln!(
