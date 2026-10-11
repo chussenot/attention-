@@ -6,17 +6,25 @@
 #   - no selection-policy implementation or reference to an excluded module is present;
 #   - neither the bundle nor the brief mentions protocol details (leakage scan).
 #
-# src/lib.rs and src/arbiter.rs are extracted from the brief's own code blocks, so the
-# documented text is what gets compiled. Commissioner-side tooling: never part of the bundle.
+# Everything delivered to the author (the brief and the copied sources) is read from the
+# bundle commit, the P2 pre-registration merge commit recorded in the ledger, not from the
+# working tree. src/lib.rs and src/arbiter.rs are extracted from that brief's own code blocks,
+# so the documented text is what gets compiled. Commissioner-side tooling: never part of the
+# bundle. Override the commit with BUNDLE_COMMIT=<sha> only to check a candidate brief.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-brief="$repo/docs/experiments/family-b-author-brief.md"
+commit="${BUNDLE_COMMIT:-46068d1}"
+git -C "$repo" cat-file -e "$commit^{commit}" 2>/dev/null || {
+    echo "FAIL: bundle commit $commit not available (fetch full history)"; exit 1;
+}
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 bundle="$work/bundle"
 verify="$work/verify"
+brief="$work/family-b-author-brief.md"
 mkdir -p "$bundle/src" "$verify/src" "$verify/tests"
+git -C "$repo" show "$commit:docs/experiments/family-b-author-brief.md" > "$brief"
 
 # Prints the first ```rust block that follows the line exactly equal to $1.
 extract_block() {
@@ -28,9 +36,11 @@ extract_block() {
     ' "$brief"
 }
 
-echo "== assembling bundle"
-cp "$repo/Cargo.toml" "$bundle/"
-cp "$repo/src/workspace.rs" "$repo/src/metrics.rs" "$repo/src/rng.rs" "$bundle/src/"
+echo "== assembling bundle from commit $commit"
+git -C "$repo" show "$commit:Cargo.toml" > "$bundle/Cargo.toml"
+for f in workspace.rs metrics.rs rng.rs; do
+    git -C "$repo" show "$commit:src/$f" > "$bundle/src/$f"
+done
 extract_block '`src/lib.rs`:' > "$bundle/src/lib.rs"
 extract_block '`src/arbiter.rs`:' > "$bundle/src/arbiter.rs"
 for f in lib.rs arbiter.rs; do

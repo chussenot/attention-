@@ -1,8 +1,15 @@
 //! Arbiters: the pluggable policy that decides which candidate wins the workspace.
 
 mod argmax;
+mod round_robin;
+pub mod score;
+pub mod tournament;
+mod uniform_random;
 
 pub use argmax::ArgmaxArbiter;
+pub use round_robin::RoundRobinArbiter;
+pub use score::{Habituation, Novelty, Rule, ScoreArbiter, ScoreConfig};
+pub use uniform_random::UniformRandomArbiter;
 
 use crate::workspace::{Chunk, Tick};
 

@@ -7,3 +7,4 @@ and every held-out block used. See `p2-protocol.md` §8.
 |---|---|---|---|---|---|
 | 2026-10-11 | P1 baseline run | `distractor_flood` (held out) | A0 (`ArgmaxArbiter`) only | PR #1 | No parameters exist for A0; nothing was tuned. 152 switches, longest streak 5/200, critical stream missed. |
 | 2026-10-11 | Exploratory habituation sweep (not committed) | `garden_path`, `stable` (development) | argmax + habituation, grid over k ∈ (0, 0.3], λ ∈ [0.5, 0.99] | none | About 29% of the grid passed both scenarios. Disclosed in `p2-protocol.md` §9. `distractor_flood` not touched. |
+| 2026-10-11 | P2 protocol pre-registered (PR #3 merged) | none | none | `46068d1` | Pre-registration reference (`p2-protocol.md` §8 step 1) and the source commit for the Family B author bundle. Every later entry refers to this commit. |

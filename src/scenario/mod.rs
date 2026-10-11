@@ -5,6 +5,7 @@
 //! processors and arbiter never see it.
 
 pub mod distractor_flood;
+pub mod family_g;
 pub mod garden_path;
 pub mod stable;
 

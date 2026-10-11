@@ -520,3 +520,53 @@ parameters as if it were still unseen.
 - **The developer will see Family B's generator source after the freeze commit,** when
   integrating it (§8, step 6). Nothing is tuned after that point.
 - **Single-winner scope:** see A1 (§1.1).
+
+## Amendment 1 (2026-10-11): implementation clarifications
+
+**What this is.** These items settle points the protocol left open when it was implemented
+(§8 step 3). None changes a hypothesis, estimand, decision rule, interval level, parameter
+range, sampling measure, scenario distribution, sanity check or held-out procedure.
+
+**What had run when it was written.** No result is affected. Before this amendment, P2 arms
+had run only in implementation tests and in one pipeline smoke run on a small development
+subset (10 instances × 16 vectors). The smoke numbers were neither inspected nor kept. The
+baseline sanity checks (§7.1) were run and passed. No held-out data was generated or touched.
+The code cites these items by number.
+
+1. **Novelty timing.** At tick *t*, novelty is updated from the tick-*t* proposals *before*
+   scoring, so `score_i` uses the change observed at *t*. Habituation is updated *after*
+   selection, as §3.1 states.
+2. **Scores recorded by RR and RND.** These arms do not score candidates. Their
+   `TickRecord.scores` are the raw weights, so that score entropy (a secondary metric) stays
+   defined.
+3. **RND draws.** One draw per tick that has at least one candidate, none on empty ticks.
+   Index = `floor(u · n)` with `u = next_f64()`, over the candidates in `ProcessorId` order.
+4. **Tournament entrants.** Only candidates with a finite score enter the tournament, matching
+   argmax, which never selects a non-finite weight. With no entrant there is no winner; with
+   one, it wins. Neither case consumes a draw.
+5. **Family G draw order and rules.**
+   - Draw order per class:
+     - C1: `n_bg`, the background weights, `w_d`, `w_pre`, `T_on`, `g`.
+     - C2: the same without `w_pre`, which C2 does not use.
+     - C3: `n_bg`, the background weights, `w_d`, `m`, `T_on`, `g`.
+     - C4: `w_d`, `n_bg`, the background weights.
+     - C5: `w_d`, `n_bg`, then one `next_u64()` per fluctuating source to seed its own stream.
+   - Draw rules: `U[a, b]` = `a + (b − a)·u` and `U{a..b}` = `a + floor(u·(b − a + 1))`.
+   - The critical stream is the critical source's chunks for `t ≥ T_on` (C1, C2), or for
+     `T_on ≤ t < T_on + m` (C3).
+   - Payloads are `"<letter>@<tick>"`, with the letter given by processor id.
+6. **τ terciles (secondary breakdown of H4).** Equal-width thirds of the declared τ range,
+   [0.01, 0.50], which are terciles of the uniform sampling measure.
+7. **Deterministic-tournament check (§3.2).** It runs as an assertion inside every
+   deterministic selection. Every tick of every deterministic run in the development grid is
+   therefore checked, and a mismatch aborts the run.
+8. **Undefined values.**
+   - A per-instance contrast skips any configuration where one of its arms has an undefined
+     value.
+   - A stratum with no defined value is left out of the stratum average.
+   - In the selection rule, an undefined rate counts as +∞, the worst value.
+   - In G, every value is defined by construction.
+9. **Monte-Carlo error (§5.2).** Uses the sample standard deviation, with an *n − 1*
+   denominator.
+10. **Smoke runs.** The runner's `dev --smoke` mode runs a labelled subset in order to test
+    the pipeline. Its output is never a protocol result and is never committed.

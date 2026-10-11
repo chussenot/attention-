@@ -10,9 +10,11 @@
 //! See `docs/design.md` for the rationale behind each design decision.
 
 pub mod arbiter;
+pub mod experiment;
 pub mod metrics;
 pub mod rng;
 pub mod scenario;
+pub mod stats;
 pub mod workspace;
 
 pub use arbiter::{Arbiter, ArgmaxArbiter, Selection};
