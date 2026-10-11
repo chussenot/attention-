@@ -122,7 +122,7 @@ impl Workspace {
     /// Runs one cycle: collect proposals, let the arbiter select, broadcast the winner.
     ///
     /// The arbiter is called even when no processor proposes anything, so that stateful
-    /// arbiters (e.g. with decaying habituation) observe the passage of time.
+    /// arbiters (e.g. with state that decays over time) observe the passage of time.
     ///
     /// # Panics
     ///
