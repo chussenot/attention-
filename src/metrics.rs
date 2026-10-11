@@ -193,6 +193,23 @@ pub fn switch_count(records: &[TickRecord]) -> u64 {
     switches
 }
 
+/// A chunk id proposed more than once in a run, if any.
+///
+/// Ground truth and stream metrics identify chunks by `ChunkId`, so ids must be unique within
+/// a run; a reused id could attribute a win to the wrong critical stream. Every chunk proposed
+/// in the run counts, on every tick and from every processor.
+pub fn duplicate_chunk_id(records: &[TickRecord]) -> Option<ChunkId> {
+    // Sort and compare neighbours: cheaper than hashing every id, and deterministic. With
+    // several duplicates, the smallest duplicated id is returned.
+    let mut ids: Vec<u64> = records
+        .iter()
+        .flat_map(|r| r.candidates.iter())
+        .map(|c| c.id.0)
+        .collect();
+    ids.sort_unstable();
+    ids.windows(2).find(|w| w[0] == w[1]).map(|w| ChunkId(w[0]))
+}
+
 /// Number of winner-to-winner transitions that could have been switches: ticks with a winner,
 /// minus one. Uses the same skipping convention as [`switch_count`].
 pub fn eligible_transitions(records: &[TickRecord]) -> u64 {
@@ -233,9 +250,19 @@ pub fn tick_entropy(scores: &[f64]) -> Option<f64> {
         return None;
     }
 
-    let min = scores.iter().copied().fold(f64::INFINITY, f64::min);
+    // Divide by the largest magnitude first, so that neither the shift nor the sum can
+    // overflow for large finite scores (e.g. [1e308, 1e308]). The distribution is invariant
+    // under positive scaling, so this changes no result mathematically: scaled scores lie in
+    // [−1, 1], shifted ones in [0, 2], and their sum is at most 2n.
+    let scale = scores.iter().fold(0.0f64, |m, s| m.max(s.abs()));
+    if scale == 0.0 {
+        return Some((scores.len() as f64).log2());
+    }
+    let scaled: Vec<f64> = scores.iter().map(|s| s / scale).collect();
+
+    let min = scaled.iter().copied().fold(f64::INFINITY, f64::min);
     let shift = if min < 0.0 { -min } else { 0.0 };
-    let shifted: Vec<f64> = scores.iter().map(|s| s + shift).collect();
+    let shifted: Vec<f64> = scaled.iter().map(|s| s + shift).collect();
     let total: f64 = shifted.iter().sum();
 
     if total == 0.0 {
