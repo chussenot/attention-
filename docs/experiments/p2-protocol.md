@@ -14,6 +14,18 @@ scenarios?
 "Better" always means two things together: fewer missed critical signals **and** an
 acceptable stability cost. Neither is reported without the other.
 
+The protocol separates two kinds of question and never answers one with the other's
+evidence:
+
+- **Mechanism effects (H1–H4, and H6 for them).** What does adding habituation, adding
+  novelty, or replacing deterministic selection with stochastic selection do, with every
+  other parameter held constant? These are estimated on configurations that share their
+  parameters (§6.2), averaged over the declared parameter measure. No configuration selection
+  is involved.
+- **Best-tuned policy performance (H7, and the policy table in §6.5).** How well does the
+  configuration chosen on development data perform on unseen data? This involves selection
+  and says nothing, on its own, about which mechanism caused the result.
+
 ### 1.1 Scope assumption
 
 - **A1, one winner per tick.** All conclusions apply to single-winner selection only. Whether
@@ -29,26 +41,56 @@ acceptable stability cost. Neither is reported without the other.
   omission and repeated attention a decision can tolerate. That task comes after P2.
 - **Decision quality is not measured.** A critical signal winning the workspace is a proxy
   for useful attention, not evidence of it.
+- **No generalisation beyond the families sampled.** Confidence intervals describe sampling
+  variability *within* a declared scenario family (§5.1). They do not show that a result
+  holds for families that were never sampled. Family B (§7.2) is the only evidence about
+  structure beyond family G, and it is a single family.
 
 ## 2. Hypotheses
 
-Each hypothesis is tested with the paired, run-level procedure in §5.
+Notation:
+- *c* = 0…511 indexes the shared parameter vectors (§6.2). *i* indexes scenario instances.
+- *X*(*c*, *i*) is arm *X*'s outcome at configuration *c* on instance *i*. For the miss rate
+  this is the missed indicator, on critical instances; for the switch rate it is the per-run
+  rate, on stable instances (§4).
+- Parameter-free arms (A0, RR, RND) have one outcome per instance, which is reused for every
+  *c*.
+- ⟨·⟩ is the mean over the 512 configurations, followed by the class-weighted mean over
+  instances (§5.1).
 
-| ID | Hypothesis | Comparison |
-|---|---|---|
-| H1 | Habituation reduces the critical miss rate. | A1 vs A0, and A3 vs A2 |
-| H2 | Novelty reduces the critical miss rate. | A2 vs A0, and A3 vs A1 |
-| H3 | The two terms are complementary: combined beats either alone. | A3 vs A1, and A3 vs A2 |
-| H4 | Stochastic selection adds value over deterministic selection of the same score, with identical score parameters. | Matched pairs S*n* vs A*n* on common score parameters (§6.2, §6.4), for n = 0..3 |
-| H5 | The benefit is robust to parameters, not tied to one point. | Pass fraction over the declared space (§6) |
-| H6 | The benefit generalises beyond the development data. | Same direction, with a CI excluding zero, on the held-out sets (§7.3) |
+### 2.1 Mechanism hypotheses (development set, G development block)
 
-For each comparison the stability cost is reported next to the miss-rate effect.
+| ID | Claim (miss rate) | Primary estimand | Simple effects (secondary) |
+|---|---|---|---|
+| H1 | Habituation reduces the critical miss rate. | Main effect Δ_H = ½⟨(A1 − A0) + (A3 − A2)⟩ | ⟨A1 − A0⟩ (novelty off), ⟨A3 − A2⟩ (novelty on) |
+| H2 | Novelty reduces the critical miss rate. | Main effect Δ_N = ½⟨(A2 − A0) + (A3 − A1)⟩ | ⟨A2 − A0⟩ (habituation off), ⟨A3 − A1⟩ (habituation on) |
+| H3 | Habituation and novelty are complementary: together they reduce misses by more than the sum of their separate reductions. | Interaction I = ⟨A3 − A2 − A1 + A0⟩ | ⟨A3 − A1⟩ and ⟨A3 − A2⟩ |
+| H4 | Stochastic selection reduces the critical miss rate relative to deterministic selection of the same score with identical score parameters. | Δ_S = ¼ Σₙ ⟨Sn − An⟩, n = 0…3 | ⟨Sn − An⟩ for each n; Δ_S by τ tercile |
 
-H4 is tested only with matched comparisons, where the deterministic and stochastic arms
-share score parameters and differ only in selection. The comparison of each arm's
-independently tuned best configuration (§6.5) is reported as an overall policy comparison
-and is **not** evidence for or against H4.
+How each hypothesis is decided:
+- **Support.** H1, H2 and H4 are supported if the upper bound of the primary estimand's
+  simultaneous interval (§5.3) is below zero. H3 is supported, meaning the terms are
+  complementary, if the upper bound of I's interval is below zero.
+- **Other outcomes for H3.** If I's lower bound is above zero, the terms are *redundant*:
+  together they reduce misses by less than the sum. Otherwise H3 is *inconclusive*.
+- **Combined arm beating both single arms is not enough.** A3 doing better than A1 and A2
+  does not establish complementarity: it is consistent with purely additive effects (I = 0).
+  Only I tests it.
+- **Floor effect.** I can only be negative if the single-mechanism arms leave misses to
+  remove. The floor diagnostic reports the fraction of (*c*, *i*) cells where A1 and A2
+  *both* detect the critical stream. An inconclusive or redundant H3 is read against that
+  diagnostic.
+- **Stability cost.** For every estimand above, the same contrast is computed on the switch
+  rate over stable instances and reported next to it with its interval. It does not decide
+  support for H1–H4; it decides H7.
+
+### 2.2 Robustness, generalisation and policy hypotheses
+
+| ID | Claim | Data | Decision rule |
+|---|---|---|---|
+| H5 | An arm's good performance is not tied to one parameter point. | G development block | For each parameterised arm, the pass fraction over V (§6.3) with a 95% Wilson interval. H5 is met for arm *X* if the interval's lower bound is at least 0.20, the provisional target. |
+| H6 | Each mechanism effect supported on development data generalises. | G held-out block 1 **and** Family B, analysed separately | Applies to each of H1–H4 that was supported on development data. Re-estimate the same estimand, with the same arms, all 512 shared vectors and the same interval level, on each held-out set. H6 is supported for that hypothesis if, on **both** sets, the interval excludes zero in the same direction as on development data. `distractor_flood` is **not** part of H6 (§7.3). |
+| H7 | The development-selected policy beats argmax on unseen data at an acceptable stability cost. | G held-out block 1 **and** Family B, analysed separately | X\* is the development-selected policy (§6.5). On each set, estimate X\*(*c*\*) − A0 for the miss rate and the switch rate, with 95% paired intervals (§5.3). H7 is supported if, on **both** sets, the miss-rate interval's upper bound is below zero **and** the switch-rate increase interval's upper bound is at most 2.5 per 100. That margin is the provisional target, used here as a non-inferiority margin. |
 
 ## 3. Arms
 
@@ -105,7 +147,7 @@ No second recency mechanism is added in P2. Habituation is the only selection-hi
   deterministic one when scores are tied.
 - **Draws:** one `u = rng.next_f64()` per contest, consumed round by round, left to right;
   *a* wins iff `u < P(a wins)`. Byes consume no draw.
-- **RNG:** `SplitMix64` (`src/rng.rs`), with one stream per run, seeded as defined in §6.6.
+- **RNG:** `SplitMix64` (`src/rng.rs`), with one stream per run, seeded as defined in §6.4.
 
 This rule is our own. Blum & Blum's Conscious Turing Machine (CTM) also uses a probabilistic
 competition, but no claim of fidelity to it is made. No arm is called "CTM" unless H4 holds.
@@ -117,41 +159,48 @@ is kept, it stays as that test.
 
 ### 3.3 Arm matrix
 
-| Arm | Selection | Habituation | Novelty | Parameters |
+| Arm | Selection | Habituation | Novelty | Components of the shared vector *v_c* used (§6.2) |
 |---|---|---|---|---|
 | A0 | deterministic | off | off | none (this is `ArgmaxArbiter`) |
 | A1 | deterministic | on | off | k, λ |
 | A2 | deterministic | off | on | η, ρ |
 | A3 | deterministic | on | on | k, λ, η, ρ |
 | S0 | stochastic | off | off | τ |
-| S1 | stochastic | on | off | τ, plus k, λ shared with A1 (§6.2) |
-| S2 | stochastic | off | on | τ, plus η, ρ shared with A2 (§6.2) |
-| S3 | stochastic | on | on | τ, plus k, λ, η, ρ shared with A3 (§6.2) |
+| S1 | stochastic | on | off | k, λ, τ |
+| S2 | stochastic | off | on | η, ρ, τ |
+| S3 | stochastic | on | on | k, λ, η, ρ, τ |
 | RR | round-robin | — | — | none |
 | RND | uniform random | — | — | none |
 
 - **Round-robin:** the winner is the proposing source with the smallest id greater than the
   previous winner's id; if there is none, the smallest proposing id. The first tick picks
   the smallest id.
-- **Uniform random:** each candidate is equally likely. Seeded as in §6.6.
-
-`arm_id` is the arm's row index above, from A0 = 0 to RND = 9.
+- **Uniform random:** each candidate is equally likely. Seeded as in §6.4.
+- **Arm ids.** `arm_id` is the arm's row index above, from A0 = 0 to RND = 9.
+- **Parameterised arms** are A1–A3 and S0–S3.
 
 ## 4. Metrics (frozen definitions)
 
 **Unit of observation:** one run, meaning one scenario instance × one arm × one parameter
 configuration. Ticks within a run are never treated as independent observations.
 
-**Primary metrics**
+**Primary metrics, per run**
 
-| Metric | Definition | Where it is computed |
+| Metric | Per-run value | Computed on |
 |---|---|---|
-| **Critical miss rate** | Fraction of runs in which at least one critical stream has `missed_critical = true` (deadline 20 ticks, as in `docs/design.md` §4). Every instance in this protocol has exactly one critical stream, so this equals the per-stream rate. | Critical classes: C1–C3 and `garden_path` |
-| **Switch rate** | Switches per 100 eligible transitions, pooled over runs: `100 · Σ switch_count / Σ eligible`. For one run, `eligible = (number of ticks with a winner) − 1`, since ticks without a winner are skipped exactly as `switch_count` skips them. A run with `eligible = 0` contributes nothing to either sum. Raw `switch_count` totals are reported alongside. | Stable classes: C4, C5 and `stable` |
+| **Critical miss** | 1 if at least one critical stream has `missed_critical = true` (deadline 20 ticks, as in `docs/design.md` §4), otherwise 0. Every critical instance in this protocol has exactly one critical stream. | Critical instances |
+| **Switch rate** | `100 · switch_count / eligible`, where `eligible = (number of ticks with a winner) − 1`. Ticks without a winner are skipped exactly as `switch_count` skips them. Runs with `eligible = 0` are excluded, and how many were excluded is reported. | Stable instances |
 
-**Secondary metrics** (descriptive; never used for acceptance):
+How these are aggregated over instances is defined in §5.1. A mean of per-run rates is used,
+not a pooled ratio, so that every estimand is linear in per-run values. That linearity allows
+the stratified paired bootstrap (§5.2) and averaging over configurations. In G's stable
+classes every source proposes on every tick, so `eligible = 199` in every run, and the mean
+of per-run rates equals the pooled ratio there. Raw `switch_count` totals are reported
+alongside.
+
+**Secondary metrics** (descriptive; never used to decide a hypothesis):
 - detection latency, for runs where the critical stream was detected;
-- the switch rate on critical classes;
+- the switch rate on critical instances;
 - `max_dominance_streak`;
 - mean and minimum score entropy.
 
@@ -160,31 +209,70 @@ Anything else computed is labelled *exploratory*.
 **Provisional targets.** These are an engineering screen, not validated thresholds, and do
 not support a claim that an arm allocates attention well:
 - critical miss rate ≤ 5%;
-- switch rate on stable classes ≤ 2.5 per 100 eligible transitions;
-- at least 20% of the declared parameter space passing both, measured as in §6.
+- switch rate on stable instances ≤ 2.5 per 100 eligible transitions;
+- at least 20% of the declared parameter space passing both (H5, §6.3).
 
 ## 5. Statistical procedure
 
-- **Pairing.** Every arm and configuration runs on exactly the same instances, with the same
-  seeds. All comparisons are paired by instance.
-- **Miss rate, one arm.** Point estimate with a 95% Wilson score interval.
-- **Paired differences** in miss rate and pooled switch rate:
-  - percentile 95% CI from a paired bootstrap over instances;
-  - 10,000 resamples drawn with `SplitMix64(0x5EED_0003)`;
-  - the switch-rate difference is recomputed as a pooled ratio in each resample.
-- **Effects of habituation and novelty.** Each effect is reported for both levels of the
-  other factor (the pairs in §2), not just averaged.
-- **No significance testing beyond these intervals.** All arms are reported, including arms
-  that look bad.
-- **Implementation.** The Wilson interval and the bootstrap are written in-crate (std-only)
-  and unit-tested against known values before any arm runs.
+### 5.1 Target populations and weighting
 
-## 6. Parameter space and selection rule
+| Set | Population the estimates describe | Critical-metric weighting | Stability-metric weighting |
+|---|---|---|---|
+| G development block, G held-out block 1 | Instances drawn from family G's declared generator (§7.1), with classes weighted equally | C1, C2, C3: ⅓ each | C4, C5: ½ each |
+| Family B | Instances drawn from Family B's delivered generator | All instances labelled `Critical`, equally weighted | All instances labelled `Stable`, equally weighted |
+
+- **Within a class or label group,** every instance has equal weight.
+- **Parameter-averaged estimands** (H1–H4, H6) first average each instance's per-run values
+  over the 512 shared vectors, then apply the weighting above.
+- **Fixed scenarios** (`garden_path`, `stable`, `distractor_flood`) are single instances.
+  They are reported separately as per-instance case studies (§7.3) and never pooled into the
+  family estimates above.
+
+### 5.2 Stratified paired bootstrap
+
+- **Strata:** G uses its classes C1…C5; Family B uses its two labels, `Critical` then
+  `Stable`.
+- **Resampling:** each resample draws, within every stratum, as many instances as the stratum
+  holds, with replacement. Index = `floor(u · n_s)` with `u = rng.next_f64()`. Strata are
+  processed in the order above, and instances within a stratum are listed in ascending seed
+  order.
+- **Pairing is preserved.** A resampled instance brings every arm and configuration run on
+  it, so every contrast is recomputed on the same resampled instances.
+- **Resamples:** 10,000 per set, from `SplitMix64(0x5EED_0003 + set_id)`, with `set_id` 0 =
+  G development block, 1 = G held-out block 1, 2 = Family B. The same resamples serve every
+  estimand within a set.
+- **Interval:** a percentile interval at level 1 − α. Sort the 10,000 replicate values; the
+  lower bound is the value at index `floor(10000 · α/2)` and the upper bound the value at
+  index `ceil(10000 · (1 − α/2)) − 1`, counting from 0.
+- **Configuration sampling is not resampled.** For parameter-averaged estimands, the
+  Monte-Carlo error from using 512 vectors instead of the full uniform measure is reported
+  separately: the standard deviation across *c* of the per-configuration estimate, divided
+  by √512.
+
+### 5.3 Interval levels and multiplicity
+
+- **H1–H4 support (development) and H6 (held-out):** α = 0.0125 (98.75% intervals). This is a
+  Bonferroni correction across the four primary mechanism estimands. Within H6 the two
+  held-out sets must *both* agree; that conjunction needs no further adjustment.
+- **H7:** α = 0.05 on each held-out set. It is a single pre-declared contrast, and both sets
+  must agree.
+- **Everything else:** 95% intervals, labelled descriptive. This covers simple effects,
+  per-class and per-*n* breakdowns, stability contrasts and per-arm rates.
+- **Pass fractions (H5):** 95% Wilson intervals over the 512 configurations, which are
+  independent draws.
+- No other significance tests are run. All arms are reported, including arms that look bad.
+
+### 5.4 Implementation
+
+The Wilson interval, the stratified bootstrap and the percentile rule are written in-crate
+(std-only) and unit-tested against known values before any arm runs.
+
+## 6. Parameter space, selection and seeds
 
 ### 6.1 Ranges
 
 These are fixed now and do not change after any run. They are sampled uniformly on the ranges
-shown; that uniform measure is what "pass fraction" refers to.
+shown; that uniform measure is what "pass fraction" and "parameter-averaged" refer to.
 
 | Parameter | Range | Used by |
 |---|---|---|
@@ -194,103 +282,99 @@ shown; that uniform measure is what "pass fraction" refers to.
 | ρ | [0, 0.95] | A2, A3, S2, S3 |
 | τ | [0.01, 0.50] | S0–S3 |
 
-### 6.2 Sampling, with score parameters shared by each matched pair
+### 6.2 One shared set of parameter vectors
 
-- **Score parameters.** For each pair *n* ∈ {1, 2, 3}, draw 512 samples θ*n*,c
-  (c = 0…511) **once**, from `SplitMix64(0x5EED_0002 + n)`. Each sample takes one `next_f64()`
-  per score parameter the pair uses, in the table's row order, mapped linearly onto that
-  parameter's range. A*n* and S*n* both use θ*n*,c as their c-th configuration.
-- **Temperature.** For each *n* ∈ {0, 1, 2, 3}, draw 512 values τ*n*,c from a **separate**
-  stream, `SplitMix64(0x5EED_0010 + n)`. The c-th configuration of S*n* is
-  (θ*n*,c, τ*n*,c); S0's is τ0,c alone. Because τ comes from its own stream, the score
-  parameters are identical whether or not a τ is drawn.
-- So A1–A3 and S0–S3 each have 512 configurations, and configuration c of S*n* differs from
-  configuration c of A*n* only in stochastic selection at temperature τ*n*,c.
-- Using random samples rather than a grid makes the pass fraction an estimate of the volume
-  of the passing region under this measure. It does not depend on grid density.
-- Each arm's pass fraction is reported with a Wilson interval.
-- Sensitivity surfaces are published: pairwise marginal plots or tables of pass and fail over
-  the samples.
+- **V** = {*v_c* : *c* = 0…511}, drawn **once** from `SplitMix64(0x5EED_0002)`.
+- Each *v_c* = (k, λ, η, ρ, τ) takes exactly five `next_f64()` draws in that order, each
+  mapped to `lo + (hi − lo) · u`. All five components are drawn for every *c*, whichever arms
+  use them.
+- **Configuration *c* of a parameterised arm** is *v_c* restricted to the components the arm
+  uses (§3.3); the rest are ignored.
+- **What is held constant in each comparison:**
+  - A1(*c*) and A3(*c*) share (k, λ);
+  - A2(*c*) and A3(*c*) share (η, ρ);
+  - S*n*(*c*) and A*n*(*c*) share every score parameter, and differ only in selection, at
+    temperature τ from *v_c*.
+- **Runs:** every parameterised arm runs at every *c* on every instance of a set, and
+  parameter-free arms run once per instance. On each set, every configuration of every arm
+  sees identical instances and seeds.
+- **Grid density:** random draws rather than a grid make the pass fraction an estimate of the
+  passing region's volume under the uniform measure, independent of grid density.
+- **Sensitivity:** surfaces are published as pairwise marginal tables of pass and fail over V,
+  per arm.
 
-### 6.3 Pass and selection rule
+### 6.3 Pass and the selection rule
 
-**Pass, for one configuration.** On the development set (§7.1), both of the following hold:
+**Pass, for one configuration of one arm.** On the G development block, with the weighting
+in §5.1, both of the following hold:
 - critical miss rate ≤ 5%;
-- pooled stable switch rate ≤ 2.5 per 100.
+- stable switch rate ≤ 2.5 per 100.
 
-**Selection rule.** It is applied mechanically to a set of indexed configurations, and every
-branch is fully tie-broken:
-1. If any configuration passes: pick the lowest miss rate among the passing ones. Break ties
-   by the lower switch rate, then the lower index.
-2. Otherwise, if any configuration meets the switch-rate target: pick the lowest miss rate
-   among those. Break ties by the lower switch rate, then the lower index.
-3. Otherwise: pick the lowest switch rate. Break ties by the lower miss rate, then the lower
-   index. Report that the arm did not pass.
+`garden_path` and `stable` outcomes are reported for every configuration but do not affect
+whether it passes (§5.1).
 
-"Lower" compares exact values: miss counts are integers, and switch rates are compared as the
-exact ratio `Σ switch_count / Σ eligible`.
+**Selection rule.** It is applied mechanically to a set of indexed candidates, and every
+branch ends in a total order:
+1. If any candidate passes: among the passing ones, the lowest miss rate, then the lowest
+   switch rate, then the lowest index.
+2. Otherwise, if any candidate meets the switch-rate target: among those, the lowest miss
+   rate, then the lowest switch rate, then the lowest index.
+3. Otherwise: the lowest switch rate, then the lowest miss rate, then the lowest index. The
+   result is reported as not passing.
 
-### 6.4 H4: matched comparisons
+Rule 1 is the primary objective: the lowest development miss rate among passing
+configurations. Rules 2 and 3 apply only when nothing passes. Rule 2 keeps the same ordering
+restricted to the stability target; rule 3 ranks by stability first, because no candidate
+meets it.
 
-**(a) Matched sweep, development set only.** For each pair *n* and each configuration c,
-compute the paired differences S*n*(c) − A*n*(c) in miss rate and in pooled switch rate, over
-the development instances. Report:
-- the distribution of each difference across the 512 configurations (median, 10th and 90th
-  percentiles);
-- the number of configurations where only S*n* passes, and where only A*n* passes.
+**Comparison of values.** Rates are computed in `f64`, summing in ascending seed order within
+each stratum and then over strata in the order of §5.2, and compared with `f64::total_cmp`.
+An exact tie falls through to the next key, and the index is always a final, unique key.
 
-**(b) Matched frozen comparison, development and held-out sets.**
-1. Apply the selection rule to A*n*'s 512 configurations to get `θ*_n`.
-2. Choose S*n*'s temperature by a τ-only development sweep: 64 values τ*n*,j
-   (j = 0…63) from `SplitMix64(0x5EED_0020 + n)`, with the score parameters held at
-   `θ*_n`, selected with the same rule (index = j).
-3. This gives the matched configuration **S*n*ᵐ = (`θ*_n`, `τ*_n`)**.
-
-For S0, which has no score parameters, step 2 is run alone.
-
-The H4 test on each held-out set is the paired comparison A*n*(`θ*_n`) vs S*n*ᵐ. Only the
-selection rule differs between them. τ was chosen on development data only.
-
-### 6.5 Overall policy comparison (not H4)
-
-Applying the selection rule to S*n*'s own 512 configurations gives its independently tuned
-configuration **S*n*ⁱ**. A*n*(`θ*_n`) vs S*n*ⁱ compares two independently tuned policies. It is
-reported, labelled as such, and never used to support H4.
-
-### 6.6 RNG streams
+### 6.4 RNG streams
 
 Every run of a randomised arm (S0–S3 and RND) gets its own reproducible stream:
 
 ```
-mix(x)      = SplitMix64::new(x).next_u64()
-run_seed    = mix(mix(mix(instance_seed) ^ arm_id) ^ stream)
+mix(x)   = SplitMix64::new(x).next_u64()
+run_seed = mix(mix(mix(instance_seed) ^ arm_id) ^ c)
 ```
 
-| Run | `stream` |
-|---|---|
-| Matched sweep configuration c (§6.2, §6.4a) | c (0…511) |
-| τ-only sweep value j (§6.4b) | 1000 + j |
-| Frozen S*n*ⁱ, and RND in every phase | 2000 |
-| Frozen S*n*ᵐ | 2001 |
+- `c` is the configuration index (0…511) for S0–S3, and 0 for RND.
+- Because `arm_id` and `c` both enter the seed, no two runs on the same instance share a
+  stream.
+- Deterministic arms use no randomness.
+- The same seeds are used whenever a configuration is re-run (§7.3), so frozen
+  configurations reproduce their grid results exactly.
 
-No two runs share a stream. Deterministic arms use no randomness.
+### 6.5 Best-tuned configurations and the selected policy X\*
 
-### 6.7 Freeze commit
+These are used only for H7 and for the descriptive policy table, never for H1–H6.
+- **Best-tuned configuration of each parameterised arm.** Apply the selection rule (§6.3) to
+  the arm's 512 configurations (index = *c*). The result is *c*\*_X.
+- **Selected policy X\*.** Apply the same rule to the seven best-tuned configurations, with
+  index = `arm_id`. A0, RR and RND are baselines and are not eligible. If X\* does not pass
+  on development data (rule 2 or 3), H7 is still evaluated on the held-out sets, and the
+  report states that X\* did not pass.
+- **Policy table.** Every arm at its best-tuned configuration, plus A0, RR and RND, on every
+  set: miss rate and switch rate with 95% intervals, and the contrast with A0. It is
+  labelled "independently tuned policy comparison" and is not evidence for any mechanism
+  hypothesis.
+
+### 6.6 Freeze commit
 
 Before any held-out evaluation, a single commit records:
-- `θ*_n` for A1–A3;
-- S*n*ᵐ and S*n*ⁱ for S0–S3;
-- every sweep result needed to reproduce those choices.
+- V, as the seed and the first and last vectors, as a check;
+- every development-grid result needed to reproduce the analysis;
+- *c*\*_X for each parameterised arm, and X\*;
+- the development estimates for H1–H5.
 
 ## 7. Scenarios
 
-All instances have horizon 200 and deadline 20. Payloads stay neutral, and criticality lives
-only in `GroundTruth`, as in `CLAUDE.md`.
+Family G instances have horizon 200 and deadline 20. Payloads stay neutral, and criticality
+lives only in `GroundTruth`, as in `CLAUDE.md`.
 
 ### 7.1 Development set
-
-**Fixed scenarios:** `garden_path` and `stable`. Their instance seeds for arm randomness are
-`1_000_001` and `1_000_002`.
 
 **Generated family G, development block:**
 - seeds 0–199;
@@ -308,10 +392,16 @@ only in `GroundTruth`, as in `CLAUDE.md`.
 | C5 *noisy stable* | Novelty's sensitivity to noise. | Dominant at `U[0.75, 0.95]`; `n_bg ~ U{2..8}` background sources, each drawing a fresh weight from `U[0.1, 0.6]` every tick. | None |
 
 By construction, the critical weight is always below the dominant weight. Processor ids are
-assigned in this order: dominant, background sources, critical.
+assigned in this order: dominant, background sources, critical. C1–C3 are the critical
+instances and C4–C5 the stable ones.
 
-**Baseline sanity checks.** These run on the development set before the sweep. If any check
-fails, the **generator** is fixed, never a baseline, and the fix is recorded in the ledger.
+**Fixed development case studies:** `garden_path` and `stable`, with instance seeds
+`1_000_001` and `1_000_002` for arm randomness. Every arm and configuration runs on them, and
+results are reported per instance (§5.1).
+
+**Baseline sanity checks.** These run on the G development block before the sweep. If any
+check fails, the **generator** is fixed, never a baseline, and the fix is recorded in the
+ledger.
 1. A0's miss rate on C1–C3 is 100%.
 2. RR's switch rate on C4 is at least 90 per 100.
 3. RR's miss rate on C3 is above 0.
@@ -320,75 +410,97 @@ fails, the **generator** is fixed, never a baseline, and the fix is recorded in 
 
 Held-out sets are used up: each one counts as unseen for one evaluation phase only (§8).
 
-1. **`distractor_flood`:** the existing frozen held-out scenario, unchanged. Its arm seed is
-   `1_000_003`.
-2. **Family G, held-out block 1:** seeds 10,000–10,199. Block *b* is seeds
-   `10_000·b … 10_000·b + 199`, and each block is used once.
-3. **Blind family B:** a generator written by an author who has not seen any of the following:
-   - arbiter code;
-   - development results;
-   - parameter ranges or chosen values;
-   - this protocol's §3, §6 and §7.1;
-   - failed experiments.
-
-   The author receives only:
-   - the `Processor`, `Chunk` and `Scenario` API (`src/workspace.rs`, `src/scenario/mod.rs`);
-   - the metric definitions and deadline (§4 of this document and `docs/design.md` §4);
-   - the failure classes to probe: fixation, premature narrowing, garden path, transient
-     critical signals and distractors;
-   - the leakage rules (`CLAUDE.md`).
-
-   Family B is evaluated on its seeds 0–199. Its generator, distributions and ground-truth
-   rules are committed, and the commit hash is recorded in the ledger, **before** the
-   held-out phase runs.
-
-   **Limitation:** if the author is another Claude session, its priors are correlated with
-   the developer's. A human author gives stronger independence.
+1. **Family G, held-out block 1:** seeds 10,000–10,199, generated by the same generator as
+   §7.1. Block *b* is seeds `10_000·b … 10_000·b + 199`, and each block is used once.
+2. **Blind Family B:** a generator written under the information barrier defined in
+   [`family-b-author-brief.md`](family-b-author-brief.md). That brief is the **only**
+   document the author receives, together with the code bundle it lists.
+   - **Contents.** Family B is evaluated on its seeds 0–199. Each instance is labelled
+     `Critical` (exactly one critical stream) or `Stable` (none), with at least 80 of each.
+   - **What the author never sees:**
+     - the arm matrix, score or selection rules;
+     - parameter ranges or values;
+     - this protocol;
+     - `CLAUDE.md`, `docs/` and the rest of the repository;
+     - development results.
+   - **Delivery and sealing.** The commissioner commits the delivered files unchanged to a
+     branch named `family-b` and records that commit hash in the ledger **before the freeze
+     commit**. The developer does not open the branch until after the freeze commit. The
+     hash proves Family B was not changed after development results existed. The developer
+     not reading it early is a procedural commitment, recorded in the ledger, not a technical
+     guarantee.
+   - **Validation, after the freeze commit.** Before any arbiter runs on Family B, it is
+     checked structurally against the brief's requirements, with no arbiter involved. If it
+     fails, it goes back to the author, with only the failing structural check named, and
+     the fix is recorded in the ledger.
+   - **Limitation.** If the author is another Claude session, its priors are correlated with
+     the developer's, which gives weaker independence than a human author. Family B is never
+     described as fully independent.
+3. **`distractor_flood`:** the existing held-out scenario, unchanged, with instance seed
+   `1_000_003`. It is a single instance whose structure the designer already knows (§9), so
+   it is a case study only (§7.3).
 
 Held-out instances are generated only when the held-out phase runs. Nobody looks at them
 before then.
 
-### 7.3 Generalisation criterion (H6)
+### 7.3 Inferential and case-study evaluation
 
-An effect generalises if, on each held-out set, its paired 95% CI excludes zero in the same
-direction as on the development set. This is reported separately for G-block-1, Family B and
-`distractor_flood`. `distractor_flood` is a single instance, so it only gets a per-arm
-outcome table, with no interval.
+- **Inferential (H6, H7):** G held-out block 1 and Family B only, using the estimands,
+  weighting, bootstrap and decision rules of §2.2 and §5. The full grid (every parameterised
+  arm at all 512 vectors, plus the parameter-free arms) runs on both sets. The H7 and
+  policy-table values are read from that grid at the frozen *c*\*_X; nothing is re-selected.
+- **Case study, non-inferential:** `distractor_flood` runs A0, RR, RND and every arm at its
+  frozen *c*\*_X. The report is a per-arm outcome table: detected or not, latency, switch
+  count, longest streak. It has no interval and is not evidence for or against any
+  hypothesis. `garden_path` and `stable` are reported the same way from the development
+  grid.
 
 ## 8. Procedure
 
-1. **Pre-register.** Merge this document. Its merge commit is the pre-registration reference.
-2. **Implement.**
+1. **Pre-register.** Merge this document. Its merge commit is the pre-registration reference,
+   and also the commit from which the Family B code bundle is taken
+   (`family-b-author-brief.md`).
+2. **Commission Family B.** Hand the author only the brief and its bundle, in an environment
+   that cannot read this repository (see the brief). This runs in parallel with steps 3–4.
+   The `family-b` branch hash must be in the ledger before step 5.
+3. **Implement.**
    - The arms;
-   - the switch-rate metric (§4);
+   - the per-run switch rate (§4);
    - family G;
-   - the Wilson interval and bootstrap;
+   - the Wilson interval, the stratified bootstrap and the percentile rule;
    - the deterministic-tournament property test;
    - a runner: an `examples/` binary with `dev` and `heldout` phases.
 
    Then run the baseline sanity checks (§7.1).
-3. **Blind authoring.** Family B is commissioned in parallel and frozen before step 5.
-4. **Development sweep.**
-   - The matched sweep: all 512 configurations of A1–A3 and S0–S3 on the development set
-     (§6.2, §6.4a);
-   - select `θ*_n`, then run the τ-only sweeps to get S*n*ᵐ (§6.4b), and select S*n*ⁱ (§6.5);
-   - publish the full sensitivity results;
-   - make the freeze commit (§6.7).
-5. **Held-out phase,** run once, as one batch:
-   - A0–A3, S0ᵐ–S3ᵐ, S0ⁱ–S3ⁱ, RR and RND, with the frozen configurations;
-   - on G-block-1, Family B and `distractor_flood`;
-   - results committed unchanged.
-6. **Report.** `docs/experiments/p2-results.md`:
+4. **Development grid.**
+   - Every arm at every configuration on the G development block, `garden_path` and
+     `stable`;
+   - estimate H1–H5;
+   - apply §6.5;
+   - publish the sensitivity results.
+5. **Freeze commit** (§6.6).
+6. **Integrate Family B.** Open the `family-b` branch, then validate it structurally
+   (§7.2).
+7. **Held-out phase,** run once, as one batch:
+   - the full grid on G held-out block 1 and Family B;
+   - the case study on `distractor_flood`;
+   - results committed unchanged, with a ledger entry marking the blocks as used.
+8. **Report.** `docs/experiments/p2-results.md`:
    - every arm, every set;
-   - effects with confidence intervals;
+   - every estimand with its interval;
+   - verdicts for H1–H7 under the rules above, failures stated as failures;
    - pass fractions;
-   - failures stated as failures.
+   - the policy table and case studies, labelled as such.
 
-**Ledger.** `docs/experiments/ledger.md` records every run of anything on a held-out set,
-every generator fix, the freeze commit and every block used.
+**Ledger.** `docs/experiments/ledger.md` is append-only. It records:
+- every run of anything on a held-out set;
+- every generator fix;
+- the `family-b` delivery hash;
+- the freeze commit;
+- every block used.
 
 **Failure handling.** A held-out failure is evidence. It leads to a revised hypothesis, a
-new amendment, and a new held-out block. The used block is never re-run against re-tuned
+new amendment, and a new held-out block. A used block is never re-run against re-tuned
 parameters as if it were still unseen.
 
 ## 9. Disclosures (prior knowledge that could bias this protocol)
@@ -401,8 +513,10 @@ parameters as if it were still unseen.
 - **The designer knows `distractor_flood`'s structure.** Its critical stream appears from
   silence at t = 80. Counting a source's appearance as novelty (§3.1) helps any scenario
   with that structure. That definition was chosen on the abrupt-onset principle, not tuned
-  against `distractor_flood`. Even so, `distractor_flood` is a weaker held-out test of
-  novelty than Family B, and its results are read with that in mind.
+  against `distractor_flood`. This is one reason `distractor_flood` is a case study and not
+  inferential evidence (§7.3).
 - **`distractor_flood` has already been run once, with A0 only** (P1, PR #1). No parameter
   was tuned on it.
+- **The developer will see Family B's generator source after the freeze commit,** when
+  integrating it (§8, step 6). Nothing is tuned after that point.
 - **Single-winner scope:** see A1 (§1.1).
