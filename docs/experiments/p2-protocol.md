@@ -570,3 +570,56 @@ The code cites these items by number.
    denominator.
 10. **Smoke runs.** The runner's `dev --smoke` mode runs a labelled subset in order to test
     the pipeline. Its output is never a protocol result and is never committed.
+
+## Amendment 2 (2026-10-11): coverage reporting and population integrity
+
+**What changes.** One decision rule (item 3) and the reporting requirements. Nothing else:
+no hypothesis, estimand, interval level, parameter range, sampling measure, scenario
+distribution, sanity check or held-out procedure.
+
+**What had run when it was written.** The same as for Amendment 1: no development grid had
+run, no held-out data had been generated or touched, and no result is affected.
+
+**Why.** Amendment 1 item 8 leaves a stratum with no defined value out of the stratum
+average. That silently changes the target population of §5.1, and Family B is where it could
+happen. This amendment makes every such case visible and prevents a verdict being drawn from
+a changed population.
+
+1. **Coverage.** Every estimate records the following, over the strata that feed its metric:
+   - the number of instances;
+   - instances with no defined value (excluded);
+   - (configuration, instance) cells skipped;
+   - partially defined instances, where some configurations had a value and others did not;
+   - strata with no defined value;
+   - bootstrap replicates in which some stratum had no defined value;
+   - bootstrap replicates with no defined value at all.
+2. **Complete population.** An estimate describes its declared population only if:
+   - no stratum lacks data, in the point estimate or in any replicate;
+   - no instance is partially defined;
+   - no replicate is undefined.
+
+   Excluded instances alone leave the population complete, since this is complete-case
+   analysis within a stratum, but they are always reported.
+
+   Why partial definition matters: a P2 value is undefined only when an instance has at most
+   one tick with any candidate. That depends on the instance, not the arm, because every arm
+   selects a winner whenever a finite-weight candidate exists. A partially defined instance
+   would therefore mean the missingness depends on the arm. In family G every value is defined
+   by construction.
+3. **Decision rule.**
+   - **H1–H4:** if the primary estimate is incomplete, the verdict is *undecidable*.
+   - **H6:** undecidable if any held-out estimate it needs is missing or incomplete.
+   - **H7:** undecidable on a set where either of its estimates is missing or incomplete, and
+     H7 is supported only if it is supported, not undecidable, on both sets.
+
+   An undecidable verdict is never counted as supported or as not supported.
+4. **Selection.** A per-configuration rate computed with a stratum left out counts as
+   undefined, that is +∞, extending Amendment 1 item 8.
+5. **Reporting.** The development report, and the held-out report for each set separately
+   (G held-out block 1 and Family B), contain a *Coverage and exclusions* section with:
+   - for each metric, a per-stratum table of instances with an undefined value in some run
+     and in every run;
+   - every estimate with exclusions (marked †) or an incomplete population (marked ⚠), with
+     its coverage.
+
+   For Family B, the strata are its two labels (§5.1).
