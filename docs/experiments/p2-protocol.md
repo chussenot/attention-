@@ -39,11 +39,16 @@ Each hypothesis is tested with the paired, run-level procedure in §5.
 | H1 | Habituation reduces the critical miss rate. | A1 vs A0, and A3 vs A2 |
 | H2 | Novelty reduces the critical miss rate. | A2 vs A0, and A3 vs A1 |
 | H3 | The two terms are complementary: combined beats either alone. | A3 vs A1, and A3 vs A2 |
-| H4 | Stochastic selection adds value over the same score selected deterministically. | S*n* vs A*n*, for n = 0..3 |
+| H4 | Stochastic selection adds value over deterministic selection of the same score, with identical score parameters. | Matched pairs S*n* vs A*n* on common score parameters (§6.2, §6.4), for n = 0..3 |
 | H5 | The benefit is robust to parameters, not tied to one point. | Pass fraction over the declared space (§6) |
 | H6 | The benefit generalises beyond the development data. | Same direction, with a CI excluding zero, on the held-out sets (§7.3) |
 
 For each comparison the stability cost is reported next to the miss-rate effect.
+
+H4 is tested only with matched comparisons, where the deterministic and stochastic arms
+share score parameters and differ only in selection. The comparison of each arm's
+independently tuned best configuration (§6.5) is reported as an overall policy comparison
+and is **not** evidence for or against H4.
 
 ## 3. Arms
 
@@ -93,12 +98,14 @@ No second recency mechanism is added in P2. Habituation is the only selection-hi
   number of entries, the last one gets a bye and advances without a contest.
 - **Contest:** between *a* and *b*, `P(a wins) = 1 / (1 + exp(−(score_a − score_b) / τ))`.
   Temperature `τ > 0` is a parameter. This rule is shift-invariant, so subtracting the same
-  amount from every score changes nothing. As `τ → 0` it approaches the deterministic rule.
-- **Ties:** equal scores give `P = 0.5`.
+  amount from every score changes nothing. As `τ → 0`, a contest between **unequal** scores
+  approaches the deterministic outcome.
+- **Ties:** equal scores give `P = 0.5` for any `τ`. This differs from the deterministic rule,
+  which gives ties to the lower `ProcessorId`, so the stochastic rule does not converge to the
+  deterministic one when scores are tied.
 - **Draws:** one `u = rng.next_f64()` per contest, consumed round by round, left to right;
   *a* wins iff `u < P(a wins)`. Byes consume no draw.
-- **RNG:** `SplitMix64` (`src/rng.rs`), seeded per run with
-  `instance_seed ^ (0xA5A5_0000_0000_0000 | arm_id)`.
+- **RNG:** `SplitMix64` (`src/rng.rs`), with one stream per run, seeded as defined in §6.6.
 
 This rule is our own. Blum & Blum's Conscious Turing Machine (CTM) also uses a probabilistic
 competition, but no claim of fidelity to it is made. No arm is called "CTM" unless H4 holds.
@@ -117,16 +124,16 @@ is kept, it stays as that test.
 | A2 | deterministic | off | on | η, ρ |
 | A3 | deterministic | on | on | k, λ, η, ρ |
 | S0 | stochastic | off | off | τ |
-| S1 | stochastic | on | off | k, λ, τ |
-| S2 | stochastic | off | on | η, ρ, τ |
-| S3 | stochastic | on | on | k, λ, η, ρ, τ |
+| S1 | stochastic | on | off | τ, plus k, λ shared with A1 (§6.2) |
+| S2 | stochastic | off | on | τ, plus η, ρ shared with A2 (§6.2) |
+| S3 | stochastic | on | on | τ, plus k, λ, η, ρ shared with A3 (§6.2) |
 | RR | round-robin | — | — | none |
 | RND | uniform random | — | — | none |
 
 - **Round-robin:** the winner is the proposing source with the smallest id greater than the
   previous winner's id; if there is none, the smallest proposing id. The first tick picks
   the smallest id.
-- **Uniform random:** each candidate is equally likely. Seeded like the stochastic arms.
+- **Uniform random:** each candidate is equally likely. Seeded as in §6.6.
 
 `arm_id` is the arm's row index above, from A0 = 0 to RND = 9.
 
@@ -174,8 +181,10 @@ not support a claim that an arm allocates attention well:
 
 ## 6. Parameter space and selection rule
 
-**Ranges.** These are fixed now and do not change after any run. They are sampled uniformly
-on the ranges shown; that uniform measure is what "pass fraction" refers to.
+### 6.1 Ranges
+
+These are fixed now and do not change after any run. They are sampled uniformly on the ranges
+shown; that uniform measure is what "pass fraction" refers to.
 
 | Parameter | Range | Used by |
 |---|---|---|
@@ -185,30 +194,93 @@ on the ranges shown; that uniform measure is what "pass fraction" refers to.
 | ρ | [0, 0.95] | A2, A3, S2, S3 |
 | τ | [0.01, 0.50] | S0–S3 |
 
-**Sampling.**
-- Each parameterised arm gets 512 configurations, drawn independently and uniformly over its
-  ranges.
-- Draws come from `SplitMix64(0x5EED_0002 + arm_id)`, one `next_f64()` per parameter the arm
-  uses, in the table's row order, mapped linearly onto that parameter's range.
+### 6.2 Sampling, with score parameters shared by each matched pair
+
+- **Score parameters.** For each pair *n* ∈ {1, 2, 3}, draw 512 samples θ*n*,c
+  (c = 0…511) **once**, from `SplitMix64(0x5EED_0002 + n)`. Each sample takes one `next_f64()`
+  per score parameter the pair uses, in the table's row order, mapped linearly onto that
+  parameter's range. A*n* and S*n* both use θ*n*,c as their c-th configuration.
+- **Temperature.** For each *n* ∈ {0, 1, 2, 3}, draw 512 values τ*n*,c from a **separate**
+  stream, `SplitMix64(0x5EED_0010 + n)`. The c-th configuration of S*n* is
+  (θ*n*,c, τ*n*,c); S0's is τ0,c alone. Because τ comes from its own stream, the score
+  parameters are identical whether or not a τ is drawn.
+- So A1–A3 and S0–S3 each have 512 configurations, and configuration c of S*n* differs from
+  configuration c of A*n* only in stochastic selection at temperature τ*n*,c.
 - Using random samples rather than a grid makes the pass fraction an estimate of the volume
   of the passing region under this measure. It does not depend on grid density.
-- The pass fraction is reported with a Wilson interval.
+- Each arm's pass fraction is reported with a Wilson interval.
 - Sensitivity surfaces are published: pairwise marginal plots or tables of pass and fail over
   the samples.
+
+### 6.3 Pass and selection rule
 
 **Pass, for one configuration.** On the development set (§7.1), both of the following hold:
 - critical miss rate ≤ 5%;
 - pooled stable switch rate ≤ 2.5 per 100.
 
-**Selection rule** (applied mechanically after the development sweep):
-1. Among the passing configurations, pick the one with the lowest development miss rate.
-2. Break ties by the lower switch rate, then by the lower sample index.
-3. If an arm has no passing configuration, use the configuration with the lowest miss rate
-   among those meeting the switch-rate target. If none meets the target, use the one with
-   the lowest switch rate. Report that the arm did not pass.
+**Selection rule.** It is applied mechanically to a set of indexed configurations, and every
+branch is fully tie-broken:
+1. If any configuration passes: pick the lowest miss rate among the passing ones. Break ties
+   by the lower switch rate, then the lower index.
+2. Otherwise, if any configuration meets the switch-rate target: pick the lowest miss rate
+   among those. Break ties by the lower switch rate, then the lower index.
+3. Otherwise: pick the lowest switch rate. Break ties by the lower miss rate, then the lower
+   index. Report that the arm did not pass.
 
-The chosen configuration for every arm is committed as the **freeze commit** before any
-held-out evaluation.
+"Lower" compares exact values: miss counts are integers, and switch rates are compared as the
+exact ratio `Σ switch_count / Σ eligible`.
+
+### 6.4 H4: matched comparisons
+
+**(a) Matched sweep, development set only.** For each pair *n* and each configuration c,
+compute the paired differences S*n*(c) − A*n*(c) in miss rate and in pooled switch rate, over
+the development instances. Report:
+- the distribution of each difference across the 512 configurations (median, 10th and 90th
+  percentiles);
+- the number of configurations where only S*n* passes, and where only A*n* passes.
+
+**(b) Matched frozen comparison, development and held-out sets.**
+1. Apply the selection rule to A*n*'s 512 configurations to get `θ*_n`.
+2. Choose S*n*'s temperature by a τ-only development sweep: 64 values τ*n*,j
+   (j = 0…63) from `SplitMix64(0x5EED_0020 + n)`, with the score parameters held at
+   `θ*_n`, selected with the same rule (index = j).
+3. This gives the matched configuration **S*n*ᵐ = (`θ*_n`, `τ*_n`)**.
+
+For S0, which has no score parameters, step 2 is run alone.
+
+The H4 test on each held-out set is the paired comparison A*n*(`θ*_n`) vs S*n*ᵐ. Only the
+selection rule differs between them. τ was chosen on development data only.
+
+### 6.5 Overall policy comparison (not H4)
+
+Applying the selection rule to S*n*'s own 512 configurations gives its independently tuned
+configuration **S*n*ⁱ**. A*n*(`θ*_n`) vs S*n*ⁱ compares two independently tuned policies. It is
+reported, labelled as such, and never used to support H4.
+
+### 6.6 RNG streams
+
+Every run of a randomised arm (S0–S3 and RND) gets its own reproducible stream:
+
+```
+mix(x)      = SplitMix64::new(x).next_u64()
+run_seed    = mix(mix(mix(instance_seed) ^ arm_id) ^ stream)
+```
+
+| Run | `stream` |
+|---|---|
+| Matched sweep configuration c (§6.2, §6.4a) | c (0…511) |
+| τ-only sweep value j (§6.4b) | 1000 + j |
+| Frozen S*n*ⁱ, and RND in every phase | 2000 |
+| Frozen S*n*ᵐ | 2001 |
+
+No two runs share a stream. Deterministic arms use no randomness.
+
+### 6.7 Freeze commit
+
+Before any held-out evaluation, a single commit records:
+- `θ*_n` for A1–A3;
+- S*n*ᵐ and S*n*ⁱ for S0–S3;
+- every sweep result needed to reproduce those choices.
 
 ## 7. Scenarios
 
@@ -297,12 +369,13 @@ outcome table, with no interval.
    Then run the baseline sanity checks (§7.1).
 3. **Blind authoring.** Family B is commissioned in parallel and frozen before step 5.
 4. **Development sweep.**
-   - Every arm × configuration on the development set;
-   - apply the selection rule (§6);
+   - The matched sweep: all 512 configurations of A1–A3 and S0–S3 on the development set
+     (§6.2, §6.4a);
+   - select `θ*_n`, then run the τ-only sweeps to get S*n*ᵐ (§6.4b), and select S*n*ⁱ (§6.5);
    - publish the full sensitivity results;
-   - commit the frozen configurations (the freeze commit).
+   - make the freeze commit (§6.7).
 5. **Held-out phase,** run once, as one batch:
-   - all arms with the frozen configurations;
+   - A0–A3, S0ᵐ–S3ᵐ, S0ⁱ–S3ⁱ, RR and RND, with the frozen configurations;
    - on G-block-1, Family B and `distractor_flood`;
    - results committed unchanged.
 6. **Report.** `docs/experiments/p2-results.md`:
