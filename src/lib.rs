@@ -11,6 +11,8 @@
 
 pub mod arbiter;
 pub mod metrics;
+pub mod rng;
+pub mod scenario;
 pub mod workspace;
 
 pub use arbiter::{Arbiter, Selection};
