@@ -84,7 +84,10 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 cargo run --example run_scenarios
+scripts/check-family-b-bundle.sh   # Family B author bundle: standalone build + leakage scan
 ```
+
+CI (`.github/workflows/ci.yml`) runs all of these on every pull request and on pushes to `main`.
 
 ## Do not
 
