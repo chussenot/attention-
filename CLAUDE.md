@@ -24,7 +24,7 @@ Background and rationale: [`docs/design.md`](docs/design.md). Literature:
    in-crate PRNG (`src/rng.rs`).
 4. **std-only.** No runtime dependencies. No dev-dependencies without asking the user first.
 5. **No ground-truth leakage.** Arbiters must be structurally unable to see which chunks are
-   critical. Criticality lives in `scenario::GroundTruth`, keyed by `ChunkId`, never on
+   critical. Criticality lives in `metrics::GroundTruth`, keyed by `ChunkId`, never on
    `Chunk`. Payloads are neutral labels.
 6. **Observability by construction.** Every tick emits a `TickRecord` (candidates, scores,
    winner, reason). Metrics are computed from records only, never from internal state.
@@ -39,9 +39,9 @@ src/lib.rs                 re-exports
 src/workspace.rs           ids, Chunk, Processor, TickRecord, Workspace (propose → select → broadcast)
 src/arbiter/mod.rs         Arbiter trait, Selection
 src/arbiter/argmax.rs      P1 baseline
-src/metrics.rs             metrics over &[TickRecord] + GroundTruth
+src/metrics.rs             GroundTruth + metrics over &[TickRecord]
 src/rng.rs                 SplitMix64, the only randomness source
-src/scenario/              Scenario, GroundTruth, ScriptedProcessor, the three scenarios
+src/scenario/              Scenario, ScriptedProcessor, the three scenarios
 tests/                     integration tests (workspace, metrics, scenarios, baseline)
 examples/run_scenarios.rs  metrics table per scenario × arbiter
 ```

@@ -73,7 +73,7 @@ If an arbiter could see which chunks are critical, it could trivially "solve" th
 The guarantee is structural rather than a convention:
 
 - `Chunk` has no criticality field, and none can be added without changing its type.
-- Criticality lives in `scenario::GroundTruth`, a set of `CriticalStream`s keyed by `ChunkId`,
+- Criticality lives in `metrics::GroundTruth`, a set of `CriticalStream`s keyed by `ChunkId`,
   which is consumed only by `metrics::evaluate`.
 - `Scenario::run` hands processors and the arbiter to the `Workspace` and keeps the ground
   truth aside; the workspace never holds it.
@@ -122,7 +122,7 @@ changes the meaning of an existing item.
 | `step` calls the arbiter **even when there are no candidates**. | Stateful arbiters (P2 habituation decays every tick) must observe the passage of time. The `ArgmaxArbiter` returns no winner in that case. |
 | `step` panics if the arbiter returns an out-of-range winner index or a `scores` vector whose length differs from the candidate count, or if a processor proposes a chunk whose `source` is not its own id. | These are programming errors in an implementation of a trait, comparable to an out-of-bounds index. Silently fixing them would corrupt records and therefore metrics. |
 | New module `src/rng.rs` (`SplitMix64`). | `distractor_flood` needs a deterministic pseudo-random sequence; decision §2.3 requires an in-crate seeded PRNG. Placed at crate level so P2/P3 can reuse it. |
-| `scenario::{Scenario, ScenarioRun, GroundTruth, CriticalStream, ScriptedProcessor}`; `Scenario` has a `held_out` flag. | Makes the scenario contract concrete and puts the "do not tune on this" rule in the data, so reports can show it. |
+| `metrics::{GroundTruth, CriticalStream, MetricsConfig, Metrics, StreamOutcome, evaluate}` and `scenario::{Scenario, ScenarioRun, ScriptedProcessor}`; `Scenario` has a `held_out` flag. Ground truth lives next to the metrics because only evaluation reads it. | Makes the evaluation and scenario contracts concrete and puts the "do not tune on this" rule in the data, so reports can show it. |
 | Chunk ids in scenarios are `chunk_id(source, t) = (source << 32) | t`. | Lets a scenario enumerate its critical `ChunkId`s up front, so ground truth is a plain set. The encoding reveals source and tick, both already visible on the chunk. |
 
 ## 4. Metric interpretations

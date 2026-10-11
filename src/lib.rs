@@ -10,6 +10,7 @@
 //! See `docs/design.md` for the rationale behind each design decision.
 
 pub mod arbiter;
+pub mod metrics;
 pub mod workspace;
 
 pub use arbiter::{Arbiter, Selection};
