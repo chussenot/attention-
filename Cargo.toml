@@ -1,0 +1,10 @@
+[package]
+name = "attn-workspace"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Deterministic global-workspace attention mechanism and an evaluation harness for fixation and premature narrowing."
+publish = false
+
+# std-only by design: no runtime dependencies, no dev-dependencies without approval.
+[dependencies]
