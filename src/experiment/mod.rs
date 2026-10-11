@@ -2,6 +2,7 @@
 //! seeds, the run grid, estimands and decision rules, and the runner phases.
 
 pub mod analysis;
+pub mod archive;
 pub mod arms;
 pub mod grid;
 pub mod phases;
