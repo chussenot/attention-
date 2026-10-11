@@ -193,6 +193,20 @@ pub fn switch_count(records: &[TickRecord]) -> u64 {
     switches
 }
 
+/// Number of winner-to-winner transitions that could have been switches: ticks with a winner,
+/// minus one. Uses the same skipping convention as [`switch_count`].
+pub fn eligible_transitions(records: &[TickRecord]) -> u64 {
+    let winners = records.iter().filter(|r| r.winner_source.is_some()).count() as u64;
+    winners.saturating_sub(1)
+}
+
+/// Switches per 100 eligible transitions for one run (`docs/experiments/p2-protocol.md` §4).
+/// `None` when the run has no eligible transition; such runs are excluded, not counted as 0.
+pub fn run_switch_rate(records: &[TickRecord]) -> Option<f64> {
+    let eligible = eligible_transitions(records);
+    (eligible > 0).then(|| 100.0 * switch_count(records) as f64 / eligible as f64)
+}
+
 /// Per-tick score entropy with its mean and minimum over defined ticks.
 pub fn score_entropy(records: &[TickRecord]) -> EntropySummary {
     let per_tick: Vec<Option<f64>> = records.iter().map(|r| tick_entropy(&r.scores)).collect();
