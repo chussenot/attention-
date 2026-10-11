@@ -48,10 +48,10 @@ examples/run_scenarios.rs  metrics table per scenario × arbiter
 
 ## Phase plan and acceptance criteria
 
-- **P0 — Harness.** Core types, `Workspace::step`, `TickRecord`, metrics, all three
+- **P0 — Harness.** ✅ Core types, `Workspace::step`, `TickRecord`, metrics, all three
   scenarios. Done when metrics are unit-tested on hand-built record sequences, including an
   empty tick, all-equal scores, and a critical stream that never wins.
-- **P1 — Baseline `ArgmaxArbiter`.** Winner = max weight, ties broken by ascending
+- **P1 — Baseline `ArgmaxArbiter`.** ✅ Winner = max weight, ties broken by ascending
   `ProcessorId`. Done when a test asserts that the baseline **misses** the critical signal in
   `garden_path` (if it does not, fix the scenario, not the baseline), and
   `examples/run_scenarios.rs` prints a metrics table per scenario and arbiter.
