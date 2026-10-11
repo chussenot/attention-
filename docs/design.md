@@ -13,8 +13,10 @@ only as sources of an *architecture*: many specialist processors, one limited-ca
 competition for that stage, and global broadcast of the winner.
 
 The long-term consumer is `jcs-core`, a scaffold for a Joint Cognitive System after Woods &
-Hollnagel (2006). Its sense-making functions (F6–F11) need a mechanism to decide what gets
-attended to next. The JCS literature also supplies the failure modes this crate must measure:
+Hollnagel (2006). Its sense-making functions need a mechanism to decide what gets attended to
+next. Which functions those are, and how they are named, is defined in the external JCS
+functional architecture document and has not been imported yet (see §7, Open dependencies).
+The JCS literature also supplies the failure modes this crate must measure:
 
 | JCS concept | How it shows up here |
 |---|---|
@@ -93,7 +95,8 @@ and a human-readable reason from the arbiter. Metrics are pure functions of
 
 - Arbiters with completely different internals are measured identically.
 - A suspicious metric can always be explained by reading the records for the ticks involved.
-- The record is the natural export surface for P4 (mapping to JCS functions) and for any
+- The record is the natural export surface for P4 (mapping to JCS functions, once their
+  definitions are imported; see §7) and for any
   later tracing integration.
 
 ### 2.7 Explicit over clever
@@ -171,3 +174,12 @@ computed in `src/metrics.rs` and unit-tested in `tests/metrics.rs`.
 `ProcessorId`. Non-finite weights are never selected. On `garden_path` it locks onto A for all
 200 ticks and never selects B's critical chunks: `missed_critical = true`. A test asserts this;
 if it ever stops being true, the scenario (not the baseline) is wrong.
+
+## 7. Open dependencies
+
+- P4 blocked: F6–F11 definitions and §9.2 per-function metric naming must be imported verbatim from the JCS functional architecture doc. Do not derive them from literature.
+
+  When P4 starts, the owner provides `docs/jcs-contract.md`, copied verbatim from that
+  document. Until then, any mention of F6–F11 in this repository is a label for that pending
+  import, not a definition. This includes the bootstrap brief in `docs/prompts/`, which is
+  kept verbatim and therefore still names F6–F11 without defining them.
