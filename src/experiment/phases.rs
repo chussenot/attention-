@@ -478,8 +478,11 @@ fn all_estimates(r: &DevResults) -> Vec<(String, Option<Estimate>)> {
     for p in &r.policies {
         out.push((format!("{} miss rate at c*", p.arm), p.miss));
         out.push((format!("{} switch rate at c*", p.arm), p.switch));
-        out.push((format!("{} miss − A0", p.arm), p.miss_vs_a0));
-        out.push((format!("{} switch − A0", p.arm), p.switch_vs_a0));
+        // A0 − A0 is not computed by design; listing it would read as missing data.
+        if p.arm != Arm::A0 {
+            out.push((format!("{} miss − A0", p.arm), p.miss_vs_a0));
+            out.push((format!("{} switch − A0", p.arm), p.switch_vs_a0));
+        }
     }
     out
 }
@@ -673,8 +676,16 @@ pub fn render_dev_report(r: &DevResults) -> String {
             p.branch.map_or("–", branch_label),
             fmt_rate(&p.miss),
             fmt_rate(&p.switch),
-            fmt_est(&p.miss_vs_a0),
-            fmt_est(&p.switch_vs_a0),
+            if p.arm == Arm::A0 {
+                "–".to_string()
+            } else {
+                fmt_est(&p.miss_vs_a0)
+            },
+            if p.arm == Arm::A0 {
+                "–".to_string()
+            } else {
+                fmt_est(&p.switch_vs_a0)
+            },
         );
     }
     let _ = writeln!(
@@ -689,7 +700,7 @@ pub fn render_dev_report(r: &DevResults) -> String {
         let _ = writeln!(s, "### `{}`\n", cs.name);
         let _ = writeln!(
             s,
-            "| Arm (at c*) | Detected | Latency | Switches | Longest streak |"
+            "| Arm (at c*) | Detected within deadline | Latency | Switches | Longest streak |"
         );
         let _ = writeln!(s, "|---|---|---|---:|---:|");
         for (arm, o) in &cs.frozen {
