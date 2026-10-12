@@ -8,7 +8,7 @@ use super::analysis::{
     MechanismVerdict, Metric, StratumCoverage,
 };
 use super::arms::{Arm, ParamVector, VECTOR_SEED, shared_vectors};
-use super::grid::{Grid, Instance, RunOutcome, SetSpec, Stratum, run_grid, run_one};
+use super::grid::{Grid, Instance, RunOutcome, SetSpec, Stratum, run_grid};
 use crate::scenario::family_g::{self, DEV_SEEDS, GClass};
 use crate::scenario::{Scenario, garden_path, stable};
 
@@ -17,7 +17,7 @@ pub const GARDEN_PATH_SEED: u64 = 1_000_001;
 pub const STABLE_SEED: u64 = 1_000_002;
 pub const DISTRACTOR_FLOOD_SEED: u64 = 1_000_003;
 
-fn g_strata() -> Vec<Stratum> {
+pub fn g_strata() -> Vec<Stratum> {
     GClass::ALL
         .iter()
         .map(|c| Stratum {
@@ -169,23 +169,45 @@ impl DevResults {
     }
 }
 
-fn fixed_case_study(
+/// A single-instance set for a fixed development case study. Every arm runs at every
+/// configuration on it, with the same seeds as any other run (§6.4).
+fn case_study_set(
     name: &'static str,
     seed: u64,
     build: fn() -> Scenario,
-    vectors: &[ParamVector],
+    critical: bool,
+) -> SetSpec {
+    SetSpec {
+        name: name.to_string(),
+        // Case studies are never bootstrapped; the id only has to differ from the G sets.
+        set_id: 100,
+        strata: vec![Stratum {
+            label: name.to_string(),
+            critical,
+        }],
+        instances: vec![Instance { seed, stratum: 0 }],
+        build: Box::new(move |_| build()),
+    }
+}
+
+/// Builds a case study from its single-instance grid: each arm at its frozen configuration,
+/// and a summary over all configurations of each parameterised arm.
+fn case_study_from_grid(
+    name: &'static str,
+    grid: &Grid,
     c_star: &dyn Fn(Arm) -> usize,
     detect: bool,
 ) -> CaseStudy {
     let frozen = Arm::ALL
         .iter()
-        .map(|&arm| (arm, run_one(arm, vectors, c_star(arm), seed, build())))
+        .map(|&arm| (arm, *grid.outcome(arm, c_star(arm), 0)))
         .collect();
     let across_v = Arm::PARAMETERISED
         .iter()
         .map(|&arm| {
-            let outcomes: Vec<RunOutcome> = (0..vectors.len())
-                .map(|c| run_one(arm, vectors, c, seed, build()))
+            let outcomes: Vec<RunOutcome> = grid.runs[&arm]
+                .iter()
+                .map(|per_instance| per_instance[0])
                 .collect();
             let value = if detect {
                 outcomes.iter().filter(|o| o.missed == Some(false)).count() as f64
@@ -202,6 +224,15 @@ fn fixed_case_study(
         frozen,
         across_v,
     }
+}
+
+/// Every run outcome of the development phase: the G development grid and the two fixed case
+/// studies, with the shared vectors they used. This is exactly what the raw-data archive holds.
+pub struct DevGrids {
+    pub vectors: Vec<ParamVector>,
+    pub g: Grid,
+    pub garden_path: Grid,
+    pub stable: Grid,
 }
 
 /// Restricts the development phase to a small subset, to exercise the pipeline end to end.
@@ -221,6 +252,14 @@ pub struct Smoke {
 /// In a protocol run, if a baseline sanity check fails: the generator must be fixed first
 /// (§7.1).
 pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults {
+    let grids = run_dev_grids(smoke, &mut log);
+    analyze_dev(&grids, smoke, &mut log)
+}
+
+/// Runs every development grid: the sanity checks first (protocol runs only, §7.1), then the
+/// G development block and the two fixed case studies, each with every arm at every
+/// configuration.
+pub fn run_dev_grids(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevGrids {
     let mut vectors = shared_vectors();
     let mut set = g_dev_set();
     if let Some(sm) = smoke {
@@ -249,14 +288,45 @@ pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults 
             log(&format!("  {done}/{total} instances"));
         }
     });
-    // Recomputed from the grid for the report; in a protocol run it equals the check above.
-    let sanity = sanity_from_grid(&grid);
+
+    log("running development case studies");
+    let garden_path = run_grid(
+        &case_study_set("garden_path", GARDEN_PATH_SEED, garden_path::build, true),
+        &Arm::ALL,
+        &vectors,
+        |_, _| {},
+    );
+    let stable = run_grid(
+        &case_study_set("stable", STABLE_SEED, stable::build, false),
+        &Arm::ALL,
+        &vectors,
+        |_, _| {},
+    );
+    DevGrids {
+        vectors,
+        g: grid,
+        garden_path,
+        stable,
+    }
+}
+
+/// Computes every development result from the grids alone, so the same analysis runs on a
+/// fresh run or on the raw-data archive.
+pub fn analyze_dev(
+    grids: &DevGrids,
+    smoke: Option<Smoke>,
+    mut log: impl FnMut(&str),
+) -> DevResults {
+    let vectors = grids.vectors.clone();
+    let grid = &grids.g;
+    // Recomputed from the grid for the report; in a protocol run it equals the pre-sweep check.
+    let sanity = sanity_from_grid(grid);
 
     log("computing estimands");
-    let resamples = analysis::resamples_for(&grid);
+    let resamples = analysis::resamples_for(grid);
     let all = analysis::all_configs(vectors.len());
     let est = |contrast: &Contrast, metric, configs: &[usize], level| {
-        analysis::estimate(&grid, &resamples, contrast, metric, configs, level)
+        analysis::estimate(grid, &resamples, contrast, metric, configs, level)
     };
 
     let mechanisms = Mechanism::ALL
@@ -270,7 +340,7 @@ pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults 
                 verdict: analysis::mechanism_verdict(m, &miss),
                 miss,
                 switch: est(&contrast, Metric::SwitchRate, &all, DESCRIPTIVE_LEVEL),
-                mc_error: analysis::monte_carlo_error(&grid, &contrast, Metric::Miss, &all),
+                mc_error: analysis::monte_carlo_error(grid, &contrast, Metric::Miss, &all),
                 simple: m
                     .simple_effects()
                     .into_iter()
@@ -303,7 +373,7 @@ pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults 
     let mut best = Vec::new();
     for &arm in &Arm::ALL {
         let (c_star, branch, passing) = if arm.is_parameterised() {
-            let candidates = analysis::arm_candidates(&grid, arm);
+            let candidates = analysis::arm_candidates(grid, arm);
             let n_pass = candidates.iter().filter(|c| c.passes()).count() as u64;
             let (met, ci) = analysis::h5_met(n_pass, candidates.len() as u64);
             let (chosen, branch) = analysis::select(&candidates);
@@ -366,7 +436,6 @@ pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults 
         .find(|a| a.id() == x.index)
         .expect("valid arm id");
 
-    log("running development case studies");
     let c_star_of = |arm: Arm| {
         policies
             .iter()
@@ -375,35 +444,18 @@ pub fn dev_phase(smoke: Option<Smoke>, mut log: impl FnMut(&str)) -> DevResults 
             .unwrap_or(0)
     };
     let case_studies = vec![
-        fixed_case_study(
-            "garden_path",
-            GARDEN_PATH_SEED,
-            garden_path::build,
-            &vectors,
-            &c_star_of,
-            true,
-        ),
-        fixed_case_study(
-            "stable",
-            STABLE_SEED,
-            stable::build,
-            &vectors,
-            &c_star_of,
-            false,
-        ),
+        case_study_from_grid("garden_path", &grids.garden_path, &c_star_of, true),
+        case_study_from_grid("stable", &grids.stable, &c_star_of, false),
     ];
 
     DevResults {
         smoke,
-        floor_diagnostic: analysis::floor_diagnostic(&grid, &all),
+        floor_diagnostic: analysis::floor_diagnostic(grid, &all),
         coverage_tables: vec![
-            (
-                Metric::Miss,
-                analysis::stratum_coverage(&grid, Metric::Miss),
-            ),
+            (Metric::Miss, analysis::stratum_coverage(grid, Metric::Miss)),
             (
                 Metric::SwitchRate,
-                analysis::stratum_coverage(&grid, Metric::SwitchRate),
+                analysis::stratum_coverage(grid, Metric::SwitchRate),
             ),
         ],
         vectors,
@@ -478,8 +530,11 @@ fn all_estimates(r: &DevResults) -> Vec<(String, Option<Estimate>)> {
     for p in &r.policies {
         out.push((format!("{} miss rate at c*", p.arm), p.miss));
         out.push((format!("{} switch rate at c*", p.arm), p.switch));
-        out.push((format!("{} miss − A0", p.arm), p.miss_vs_a0));
-        out.push((format!("{} switch − A0", p.arm), p.switch_vs_a0));
+        // A0 − A0 is not computed by design; listing it would read as missing data.
+        if p.arm != Arm::A0 {
+            out.push((format!("{} miss − A0", p.arm), p.miss_vs_a0));
+            out.push((format!("{} switch − A0", p.arm), p.switch_vs_a0));
+        }
     }
     out
 }
@@ -673,8 +728,16 @@ pub fn render_dev_report(r: &DevResults) -> String {
             p.branch.map_or("–", branch_label),
             fmt_rate(&p.miss),
             fmt_rate(&p.switch),
-            fmt_est(&p.miss_vs_a0),
-            fmt_est(&p.switch_vs_a0),
+            if p.arm == Arm::A0 {
+                "–".to_string()
+            } else {
+                fmt_est(&p.miss_vs_a0)
+            },
+            if p.arm == Arm::A0 {
+                "–".to_string()
+            } else {
+                fmt_est(&p.switch_vs_a0)
+            },
         );
     }
     let _ = writeln!(
@@ -689,7 +752,7 @@ pub fn render_dev_report(r: &DevResults) -> String {
         let _ = writeln!(s, "### `{}`\n", cs.name);
         let _ = writeln!(
             s,
-            "| Arm (at c*) | Detected | Latency | Switches | Longest streak |"
+            "| Arm (at c*) | Detected within deadline | Latency | Switches | Longest streak |"
         );
         let _ = writeln!(s, "|---|---|---|---:|---:|");
         for (arm, o) in &cs.frozen {
